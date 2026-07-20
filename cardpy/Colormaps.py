@@ -26,33 +26,26 @@ def cDTI_Colormaps_Generator():
     import matplotlib as mpl
     from   scipy      import interpolate
     ########## Define Path to Colormap Text Files ##################################################################################################
-    Colormaps_Path = __file__
-    Colormaps_Path = Colormaps_Path.split('Colormaps.py')[0]
-    Colormaps_Path = os.path.join(Colormaps_Path, 'Colormaps')
+    Colormaps_Path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Colormaps_data')
     ########## Generate Helix Angle Colormap #######################################################################################################
     Helix_Angle_Path          = os.path.join(Colormaps_Path, 'Helix_Angle.txt')
-    f                         = open(Helix_Angle_Path, 'r')
-    Helix_Angle_Colormap_Data = np.genfromtxt(f, delimiter = '\t')
+    Helix_Angle_Colormap_Data = np.genfromtxt(Helix_Angle_Path, delimiter = '\t')
     cmap_HA                   = mpl.colors.ListedColormap(Helix_Angle_Colormap_Data)
     ########## Generate E2 Angle Colormap ##########################################################################################################
     E2_Angle_Path          = os.path.join(Colormaps_Path, 'E2_Angle.txt')
-    f                      = open(E2_Angle_Path, 'r')
-    E2_Angle_Colormap_Data = np.genfromtxt(f, delimiter = '\t')
+    E2_Angle_Colormap_Data = np.genfromtxt(E2_Angle_Path, delimiter = '\t')
     cmap_E2A               = mpl.colors.ListedColormap(E2_Angle_Colormap_Data)
     ########## Generate Absolute E2 Angle Colormap #################################################################################################
     Absolute_E2_Angle_Path          = os.path.join(Colormaps_Path, 'Absolute_E2_Angle.txt')
-    f                               = open(Absolute_E2_Angle_Path, 'r')
-    Absolute_E2_Angle_Colormap_Data = np.genfromtxt(f, delimiter = '\t')
+    Absolute_E2_Angle_Colormap_Data = np.genfromtxt(Absolute_E2_Angle_Path, delimiter = '\t')
     cmap_absE2A                     = mpl.colors.ListedColormap(Absolute_E2_Angle_Colormap_Data)
     ########## Generate Transverse Angle Colormap ##################################################################################################
     Transverse_Angle_Path          = os.path.join(Colormaps_Path, 'Transverse_Angle.txt')
-    f                              = open(Transverse_Angle_Path, 'r')
-    Transverse_Angle_Colormap_Data = np.genfromtxt(f, delimiter = '\t')
+    Transverse_Angle_Colormap_Data = np.genfromtxt(Transverse_Angle_Path, delimiter = '\t')
     cmap_TA                        = mpl.colors.ListedColormap(Transverse_Angle_Colormap_Data)
     ########## Generate Mean Diffusivity/Apperant Diffusion Coefficent Colormaps ###################################################################
     Mean_Diffusivity_Path                       = os.path.join(Colormaps_Path, 'Mean_Diffusivity.txt')
-    f                                           = open(Mean_Diffusivity_Path, 'r')
-    Mean_Diffusivity_Colormap_Data              = np.genfromtxt(f, delimiter = '\t')
+    Mean_Diffusivity_Colormap_Data              = np.genfromtxt(Mean_Diffusivity_Path, delimiter = '\t')
     f_x                                         = interpolate.interp1d(np.arange(0, 64), Mean_Diffusivity_Colormap_Data[:, 0])
     f_y                                         = interpolate.interp1d(np.arange(0, 64), Mean_Diffusivity_Colormap_Data[:, 1])
     f_z                                         = interpolate.interp1d(np.arange(0, 64), Mean_Diffusivity_Colormap_Data[:, 2])
@@ -67,8 +60,7 @@ def cDTI_Colormaps_Generator():
     cmap_ADC                                    = mpl.colors.ListedColormap(Mean_Diffusivity_Colormap_Data_interpolated)
     ########## Generate Fractional Anisotropy Colormap #############################################################################################
     Fractional_Anisotropy_Path                       = os.path.join(Colormaps_Path, 'Fractional_Anisotropy.txt')
-    f                                                = open(Fractional_Anisotropy_Path, 'r')
-    Fractional_Anisotropy_Colormap_Data              = np.genfromtxt(f, delimiter = '\t')
+    Fractional_Anisotropy_Colormap_Data              = np.genfromtxt(Fractional_Anisotropy_Path, delimiter = '\t')
     f_x                                              = interpolate.interp1d(np.arange(0, 64), Fractional_Anisotropy_Colormap_Data[:, 0])
     f_y                                              = interpolate.interp1d(np.arange(0, 64), Fractional_Anisotropy_Colormap_Data[:, 1])
     f_z                                              = interpolate.interp1d(np.arange(0, 64), Fractional_Anisotropy_Colormap_Data[:, 2])
@@ -82,8 +74,7 @@ def cDTI_Colormaps_Generator():
     cmap_FA                                          = mpl.colors.ListedColormap(Fractional_Anisotropy_Colormap_Data_interpolated)
     ########## Generate Mode Colormap ##############################################################################################################
     Mode_Path                       = os.path.join(Colormaps_Path, 'Mode.txt')
-    f                               = open(Mode_Path, 'r')
-    Mode_Colormap_Data              = np.genfromtxt(f, delimiter = '\t')
+    Mode_Colormap_Data              = np.genfromtxt(Mode_Path, delimiter = '\t')
     f_x                             = interpolate.interp1d(np.arange(0, 64), Mode_Colormap_Data[:, 0])
     f_y                             = interpolate.interp1d(np.arange(0, 64), Mode_Colormap_Data[:, 1])
     f_z                             = interpolate.interp1d(np.arange(0, 64), Mode_Colormap_Data[:, 2])

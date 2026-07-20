@@ -56,6 +56,7 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
                 matrix_list.append(temp_image)
                 bvals_slices_list[slc].append(stacked_bvals[dif])
                 bvecs_slices_list[slc].append(stacked_bvecs[dif])
+        #print(matrix_list.shape)
         matrix_slices_list.append(np.concatenate(matrix_list, axis = 2))
     Tensor_list                = []
     eigenvalue_1_list          = []

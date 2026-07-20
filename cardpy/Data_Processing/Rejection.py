@@ -52,7 +52,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         temporary_matrix = original_matrix_stacked                                                                                              # Create temporary matrix variable
     ########## ROI Cropping for Image #############################################################################################################
     slices                 = original_matrix_stacked.shape[2]                                                                      #
-    Slice_Crop_Coortinates = []                                                                                                    #
+    Slice_Crop_Coordinates = []                                                                                             #
     if zoom == 'ON':                                                                                                               #
         print(zoom)
         print(slices)
@@ -122,7 +122,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         for avg_i in range(len(bval_low_indicies)):                                                                                                                                   # Iterate through averages (ith average)
             for avg_j in range(len(bval_low_indicies)):                                                                                                                                   # Iterate through averages (jth average)
                 SSIM_bvl_v_bvl[avg_i, avg_j, slc] = ssim(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
-                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]])                           # Compute SSIM between ith and jth low b-value averages
+                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
                 RMSE_bvl_v_bvl[avg_i, avg_j, slc] = np.sqrt(mse(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
                                                                 original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
         NSSIM_bvl_v_bvl[:, :, slc] = SSIM_bvl_v_bvl[:, :, slc] / SSIM_bvl_v_bvl[:, :, slc].max()                                          # Normalize SSIM across all averages
@@ -134,6 +134,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         #for baseline in range(len(bval_low_indicies)):                                                                                                                  # Iterate through low b-values
         NSSIM_AoA_pre[:, slc] = np.sum(NSSIM_bvl_v_bvl[:, :, slc], axis = 0) / np.sum(NSSIM_bvl_v_bvl[:, :, slc], axis = 0).max()         # Calcualte NSSIM AoA for pre automatic acquisition rejection
         NRMSE_AoA_pre[:, slc] = np.sum(NRMSE_bvl_v_bvl[:, :, slc], axis = 0) / np.sum(NRMSE_bvl_v_bvl[:, :, slc], axis = 0).max()         # Calcualte NRMSE AoA for pre automatic acquisition rejection
+        #-------------------------------------
     for slc in range(slices):                                                                                                                                       # Iterate through slices
             NSSIM_AoA_pre_list = NSSIM_AoA_pre[:, slc].tolist()                                                                                                   # Convert NSSIM AoA for pre automatic acquisition rejection to a list
             NRMSE_AoA_pre_list = NRMSE_AoA_pre[:, slc].tolist()                                                                                                   # Convert NRMSE AoA for pre automatic acquisition rejection to a list
@@ -254,7 +255,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         for avg_i in range(len(bval_high_indicies)):                                                                                                                                   # Iterate through averages (ith average)
             for avg_j in range(len(bval_high_indicies)):                                                                                                                                   # Iterate through averages (jth average)
                 SSIM_bvh_v_bvh[avg_i, avg_j, slc] = ssim(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
-                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]])                           # Compute SSIM between ith and jth low b-value averages
+                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
                 RMSE_bvh_v_bvh[avg_i, avg_j, slc] = np.sqrt(mse(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
                                                                 original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
         NSSIM_bvh_v_bvh[:, :, slc] = SSIM_bvh_v_bvh[:, :, slc] / SSIM_bvh_v_bvh[:, :, slc].max()                                          # Normalize SSIM across all averages
@@ -265,6 +266,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(slices):                                                                                                                                       # Iterate through slices
         NSSIM_AoA_pre[:, slc] = np.sum(NSSIM_bvh_v_bvh[:, :, slc], axis = 0) / np.sum(NSSIM_bvh_v_bvh[:, :, slc], axis = 0).max()         # Calcualte NSSIM AoA for pre automatic acquisition rejection
         NRMSE_AoA_pre[:, slc] = np.sum(NRMSE_bvh_v_bvh[:, :, slc], axis = 0) / np.sum(NRMSE_bvh_v_bvh[:, :, slc], axis = 0).max()         # Calcualte NRMSE AoA for pre automatic acquisition rejection
+        #---------------------
     for slc in range(slices):                                                                                                                                       # Iterate through slices
         NSSIM_AoA_pre_list = NSSIM_AoA_pre[:, slc].tolist()                                                                                                      # Convert NSSIM AoA for pre automatic acquisition rejection to a list
         NRMSE_AoA_pre_list = NRMSE_AoA_pre[:, slc].tolist()                                                                                                      # Convert NSSIM AoA for pre automatic acquisition rejection to a list
@@ -469,4 +471,4 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
                         accepted_matrix[:, :, slc, dif, 0] = temp_image_offset
         accepted_bvals  = original_bvals
         accepted_bvecs  = original_bvecs
-    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coortinates]
+    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates] 

@@ -4,7 +4,6 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     import matplotlib.pyplot                 as plt
     import numpy                             as np
     from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from   RangeSlider.RangeSlider           import RangeSliderV
     import sys
     from   cardpy.Colormaps                  import cDTI_Colormaps_Generator
     from   screeninfo import get_monitors
@@ -70,8 +69,8 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     image1 = matrix[:, :, slc]
     image2 = MD_Map[:, :, slc]
     image3 = np.abs(E1_Map[:, :, slc, :])
-    min_clim = np.int(np.round(np.min(image1)))
-    max_clim = np.int(np.round(np.max(image1)))
+    min_clim = int(np.round(np.min(image1)))
+    max_clim = int(np.round(np.max(image1)))
     x_center = image1.shape[0]
     y_center = image1.shape[1]
 #     image               = np.max(matrix[:, :, slc, :], axis = 2)
@@ -98,8 +97,8 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
         print(str(m))
     monitor_height = m.height
     monitor_width  = m.width
-    monitor_scale  = monitor_width / 5120
-    monitor_scale  = monitor_width / 2560
+    monitor_scale  = monitor_width / 5120 * 30
+    monitor_scale  = monitor_width / 2560 * 30
     LARGEFONT  = ("Verdana", int(np.round(monitor_scale * 35)))
     MEDIUMFONT = ("Verdana", int(np.round(monitor_scale * 25)))
     SMALLFONT  = ("Verdana", int(np.round(monitor_scale * 15)))
@@ -116,17 +115,21 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     button_txt_col3 = '#B5C2D9'
 
     root.configure(bg = app_bkg_col)
-    #Get the current screen width and height
-    screen_width  = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
+
+    
+    try:
+        root.tk.call('tk', 'scaling', 1.0)
+    except Exception:
+        pass
+
+   
+    screen_width  = monitor_width
+    screen_height = monitor_height
     print(screen_width)
     print(screen_height)
-    scale_factor = 0.95
+    scale_factor = 0.75
 
-    if screen_width > screen_height:
-        screen_min = screen_height
-    if screen_width > screen_height:
-        screen_min = screen_height
+    screen_min = screen_height if screen_width >= screen_height else screen_width
     print(screen_min)
     if matrix_type == 'SQUARE':
         window_width  = int(screen_min * scale_factor)
@@ -141,8 +144,10 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     geometry_string = str(window_width) + 'x' + str(window_height) + '+0+0'
     print(geometry_string)
     root.geometry(geometry_string)
-    root.resizable(0, 0)
+    root.minsize(int(window_width * 0.5), int(window_height * 0.5))
+    root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
     root.title('INTeractive Elliptical Region Contouring of Myocardium Software')
+
 
     Image_Label = tk.Label(root, font = LARGEFONT,
                            fg = app_txt_col, bg = app_bkg_col)
@@ -542,8 +547,8 @@ def select_Endo_Center():
     global conditions
     global x_center, y_center
 
-    Endo_Center_x = np.int(np.round(x_center))
-    Endo_Center_y = np.int(np.round(y_center))
+    Endo_Center_x = int(np.round(x_center))
+    Endo_Center_y = int(np.round(y_center))
     Endo_Center   = [Endo_Center_x, Endo_Center_y]
     Endo_Center_x1_Label.config(text = Endo_Center[0])
     Endo_Center_y1_Label.config(text = Endo_Center[1])
@@ -581,8 +586,8 @@ def select_Epi_Center():
     global conditions
     global x_center, y_center
     
-    Epi_Center_x = np.int(np.round(x_center))
-    Epi_Center_y = np.int(np.round(y_center))
+    Epi_Center_x = int(np.round(x_center))
+    Epi_Center_y = int(np.round(y_center))
     Epi_Center   = [Epi_Center_x, Epi_Center_y]
     Epi_Center_x1_Label.config(text = Epi_Center[0])
     Epi_Center_y1_Label.config(text = Epi_Center[1])
@@ -617,7 +622,7 @@ def next_slice():
     import tkinter as tk
     from sys import platform
     import numpy as np
-    from   cDTIpy.Colormaps.Diffusion import cDTI_Colormaps_Generator
+    from cardpy.Colormaps import cDTI_Colormaps_Generator
     if platform == 'darwin':
         from tkmacosx import Button
     else:
@@ -745,7 +750,7 @@ def finish_program():
 def update_plots(val):
     ### Set Figure Plots
     import numpy as np
-    from   cDTIpy.Colormaps.Diffusion import cDTI_Colormaps_Generator
+    from cardpy.Colormaps import cDTI_Colormaps_Generator
 
     global slc, dummy1, dummy_canvas1
     global dummy_scale1_idx, dummy_scale2_idx
@@ -902,3 +907,6 @@ def IntERCOMS_Mask_Making(matrix, Endo_Centers, Endo_Axes, Epi_Centers, Epi_Axes
         Myo_BP_mask[:, :, slc]     = epi_image
         del endo_image, epi_image
     return [myocardium_mask, Myo_BP_mask, blood_pool_mask]
+
+def quit_program():
+    root.destroy()

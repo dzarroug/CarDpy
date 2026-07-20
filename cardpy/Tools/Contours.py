@@ -489,7 +489,7 @@ def Point2Pixel(x_coordinate, y_coordinate):
 
 def Moving_Window_2D(original_x, original_y, original_data, kernel_size):
     import numpy as np
-    kernel_size = np.int(np.round(kernel_size))
+    kernel_size = int(np.round(kernel_size))
     skip_flag   = 'OFF'
     if kernel_size < 3:
         kernel_size = int(3)
@@ -511,17 +511,17 @@ def Moving_Window_2D(original_x, original_y, original_data, kernel_size):
     
     temporary_matrix = np.copy(original_data)
     padded_array     = np.pad(temporary_matrix,
-                              (kernel_size - np.int(np.ceil( kernel_size / 2)), kernel_size - np.int(np.ceil( kernel_size / 2))),
+                              (kernel_size - int(np.ceil( kernel_size / 2)), kernel_size - int(np.ceil( kernel_size / 2))),
                               'constant',
                               constant_values = np.nan)
     
-    new_x   = original_x + kernel_size - np.int(np.ceil( kernel_size / 2))
-    new_y   = original_y + kernel_size - np.int(np.ceil( kernel_size / 2))
+    new_x   = original_x + kernel_size - int(np.ceil( kernel_size / 2))
+    new_y   = original_y + kernel_size - int(np.ceil( kernel_size / 2))
 
-    minus_x = kernel_size - np.int(np.ceil( kernel_size / 2))
-    plus_x  = kernel_size - np.int(np.floor(kernel_size / 2))
-    minus_y = kernel_size - np.int(np.ceil( kernel_size / 2))
-    plus_y  = kernel_size - np.int(np.floor(kernel_size / 2))
+    minus_x = kernel_size - int(np.ceil( kernel_size / 2))
+    plus_x  = kernel_size - int(np.floor(kernel_size / 2))
+    minus_y = kernel_size - int(np.ceil( kernel_size / 2))
+    plus_y  = kernel_size - int(np.floor(kernel_size / 2))
 
     window  = padded_array[new_x - minus_x:new_x + plus_x, new_y - minus_y:new_y + plus_y]
     

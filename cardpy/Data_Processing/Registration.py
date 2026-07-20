@@ -73,6 +73,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                 static            = temporary_matrix[:, :, slc,   0, avg]                                                                                       # Choose static image
                 moving            = temporary_matrix[:, :, slc, dif, avg]                                                                                       # Choose moving image
                 ##### Center of mass in 2D #####
+                # debug print: print(f"avg={avg}, slc={slc}, dif={dif} | static max={static.max()}, sum={static.sum()} | moving max={moving.max()}, sum={moving.sum()}")
                 static_grid2world = None                                                                                                                        # Define static coordinates
                 moving_grid2world = None                                                                                                                        # Define moving coordinates
                 c_of_mass         = transform_centers_of_mass(static, static_grid2world, moving, moving_grid2world)                                             # Initialize and perform center of mass registration

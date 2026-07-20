@@ -354,8 +354,8 @@ def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, k
         helix_angle               = np.zeros(x_original.shape)
         theta                     = np.zeros(x_original.shape)
         radius                    = np.zeros(x_original.shape)
-        x_offset                  = np.int(mean_endo_x[slc])
-        y_offset                  = np.int(mean_endo_y[slc])
+        x_offset                  = int(mean_endo_x[slc])
+        y_offset                  = int(mean_endo_y[slc])
         for index in range(x_original.shape[0]):
             point_static  = np.array([0, 50])                                                                                           # Static (reference) point
             point_origin  = np.array([0, 0])                                                                                            # Origin point
@@ -410,8 +410,8 @@ def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, k
 
         helix_angle_updated = np.copy(helix_angle_original)
         for index in range(sorted_data_stacked.shape[0]):
-            x    = np.int(sorted_data_stacked[index, 0])
-            y    = np.int(sorted_data_stacked[index, 1])
+            x    = int(sorted_data_stacked[index, 0])
+            y    = int(sorted_data_stacked[index, 1])
             if (helix_angle_updated[x, y] != sorted_data_stacked[index, 3]):
                 helix_angle_updated[x, y] = sorted_data_stacked[index, 3]
 
@@ -419,16 +419,16 @@ def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, k
         spatial_helix_angle_filter  = np.copy(helix_angle_updated)
         temp_matrix = np.copy(helix_angle_updated)
         for index in range(sorted_data_stacked.shape[0]):
-            new_x  = np.int(sorted_data_stacked[index, 0])
-            new_y  = np.int(sorted_data_stacked[index, 1])
-            x      = np.int(np.floor((kernel_size - 1)/2))
-            y      = np.int(np.floor((kernel_size - 1)/2))
+            new_x  = int(sorted_data_stacked[index, 0])
+            new_y  = int(sorted_data_stacked[index, 1])
+            x      = int(np.floor((kernel_size - 1)/2))
+            y      = int(np.floor((kernel_size - 1)/2))
             window = Moving_Window_2D(new_x, new_y, temp_matrix, kernel_size)
-            if index < np.int(sorted_data_stacked.shape[0] / 2):
-                mean_epi  = np.int(np.nanmean(sorted_data_list[0][:, 3]))
+            if index < int(sorted_data_stacked.shape[0] / 2):
+                mean_epi  = int(np.nanmean(sorted_data_list[0][:, 3]))
                 window    = np.nan_to_num(window, nan = mean_epi)
-            if index > np.int(sorted_data_stacked.shape[0] / 2):
-                mean_endo = np.int(np.nanmean(sorted_data_list[-1][:, 3]))
+            if index > int(sorted_data_stacked.shape[0] / 2):
+                mean_endo = int(np.nanmean(sorted_data_list[-1][:, 3]))
                 window    = np.nan_to_num(window, nan = mean_endo)
             new_window   = np.copy(window)
             window_mean  = np.nanmean(new_window)

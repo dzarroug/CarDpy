@@ -1,11 +1,20 @@
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+from   sys                               import platform
+import tkinter                           as tk
+import matplotlib.pyplot                 as plt
+import numpy                             as np
+from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from   screeninfo                        import get_monitors
+
 def INTERACT_GUI(original_matrix, organ_of_intrest):
     from   sys                               import platform
     import tkinter                           as tk
     import matplotlib.pyplot                 as plt
     import numpy                             as np
     from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from   RangeSlider.RangeSlider           import RangeSliderH, RangeSliderV
-    
+        
     global hVar1, hVar2, hVar3, hVar4, hVar5, hVar6
     global slc, image_normalization, Next_Button, Finish_Button, Image_Label
     global dummy_scale1_idx, dummy_scale2_idx, dummy_scale3_idx, dummy_scale4_idx
@@ -22,18 +31,15 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
         matrix_ratio = matrix.shape[1] / matrix.shape[0]
         matrix_type = 'SQUARE'
         matrix_type = 'TALL'
-        print(matrix_ratio)
-        print(matrix_type)
     if matrix.shape[1] > matrix.shape[0]:
         matrix_ratio = matrix.shape[0] / matrix.shape[1]
         matrix_type = 'LONG'
-        print(matrix_ratio)
-        print(matrix_type)
     if matrix.shape[0] == matrix.shape[1]:
         matrix_ratio = 1
         matrix_type = 'SQUARE'
-        print(matrix_ratio)
-        print(matrix_type)
+
+
+    #matrix_ratio = 2 
     slc = 0
     image               = np.max(matrix[:, :, slc, :], axis = 2)
     image_normalization = image / image.max()
@@ -73,18 +79,25 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
 
 
     root.configure(bg = app_bkg_col)
-    #Get the current screen width and height
-    screen_width  = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    print(screen_width)
-    print(screen_height)
-    scale_factor = 0.95
 
-    if screen_width > screen_height:
-        screen_min = screen_height
-    if screen_width > screen_height:
-        screen_min = screen_height
-    print(screen_min)
+    # Force a 1:1 Tk scaling factor. conda-forge's Tk build has a bug on macOS Retina displays 
+    try:
+        root.tk.call('tk', 'scaling', 1.0)
+    except Exception:
+        pass
+
+    # Query the OS directly for monitor size via screeninfo instead of Tk's
+    try:
+        primary_monitor = next((m for m in get_monitors() if getattr(m, 'is_primary', False)), get_monitors()[0])
+        screen_width  = primary_monitor.width
+        screen_height = primary_monitor.height
+    except Exception:
+        root.update_idletasks()
+        screen_width  = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+    scale_factor = 0.75
+
+    screen_min = min(screen_width, screen_height)
     if matrix_type == 'SQUARE':
         window_width  = int(screen_min * scale_factor)
         window_height = int(screen_min * scale_factor * matrix_ratio)
@@ -96,10 +109,16 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
         window_height = int(screen_min * scale_factor * matrix_ratio)
 
     geometry_string = str(window_width) + 'x' + str(window_height) + '+0+0'
-    print(geometry_string)
     root.geometry(geometry_string)
-    root.resizable(0, 0)
+    root.minsize(int(window_width * 0.5), int(window_height * 0.5))
+    root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
     root.title('INTeractive Enhanced Rectangular Area Cropping Tool')
+    root.update_idletasks()
+    
+    #new
+    window_width  = root.winfo_width()
+    window_height = root.winfo_height()
+
 
     Image_Label = tk.Label(root, font = MEDIUMFONT,
                            fg = app_txt_col, bg = app_bkg_col)
@@ -146,198 +165,80 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
     hVar4 = tk.DoubleVar()  # right handle variable
     hVar5 = tk.DoubleVar()  # left handle variable
     hVar6 = tk.DoubleVar()  # right handle variable
-    pad_x  = 15
-    if matrix_type == 'SQUARE':
-        slider_width  = int(window_width / 10) * 8
-        slider_height = int(window_height / 10 )
-    if matrix_type == 'TALL':
-        slider_width  = int(window_width / 10) * 8 * matrix_ratio
-        slider_height = int(window_height / 10 )
-    if matrix_type == 'LONG':
-        slider_width  = int(window_width / 10) * 8
-        slider_height = int(window_height / 10)
-    if slider_width < 75:
-        slider_width = 75
-    if slider_height < 75:
-        slider_height = 75
+    hVar5.set(0)   # ADD THIS — matches initial min_clim
+    hVar6.set(1)   # ADD THIS — matches initial max_clim
+    # ------------------------------------------------------------------
+    # Range controls.
+    # ------------------------------------------------------------------
+    x_max = matrix.shape[1] - 1
+    y_max = matrix.shape[0] - 1
 
-    
+    hVar1.set(0)          # x start (left)
+    hVar2.set(x_max)      # x end   (right)
+    hVar3.set(0)          # y start (in slider space; inverted by callers)
+    hVar4.set(y_max)      # y end   (in slider space; inverted by callers)
 
-    
-    H_min_val     = 0
-    H_max_val     = matrix.shape[1] - 1
-    H_line_width  = 5
-    H_bar_radius  = 10
-    H_font_size   = 15
-    H_font_family = 'Verdana'
-    
-    H_padX   = max(max(len(str(H_min_val)), len(str(H_max_val))) * H_font_size * 1.33 / 4, H_bar_radius)
-    H_width  = 2 * (H_padX + H_bar_radius)
-    H_height = 2 * (1.33 * H_font_size + H_bar_radius)
-    rs1 = RangeSliderH(root,
-                       [hVar1, hVar2],
-                       Width           = slider_width,
-                       Height          = H_height,
-                       min_val         = H_min_val,
-                       max_val         = H_max_val,
-                       padX            = H_padX,
-                       line_width      = H_line_width,
-                       bar_radius      = H_bar_radius,
-                       font_size       = H_font_size,
-                       font_family     = H_font_family,
-                       bar_color_inner = '#FFFFFF',
-                       bar_color_outer = '#61ba86',
-                       line_s_color    = '#000000',
-                       line_color      = '#808080',
-                       bgColor         = '#ECECEC',
-                       show_value      = False,
-                       digit_precision = '.0f')
-    rs1.place(relheight = 0.1,
-              relwidth  = 0.8,
-              relx      = 0.1,
-              rely      = 0.9)
+    scale_bg = '#ECECEC'
+    scale_fg = '#000000'
 
-    if matrix_type == 'SQUARE':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10 ) * 8
-    if matrix_type == 'TALL':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10 ) * 8
-    if matrix_type == 'LONG':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10) * 8
-    # width  = int(window_width / 10) # - pad_x
-    if slider_width < 75:
-        slider_width = 75
-    # height = int(window_height / 10 ) * 8
-    if slider_height < 75:
-        slider_height = 75
-    
-    
-    V_min_val     = 0
-    V_max_val     = matrix.shape[0] - 1
-    V_line_width  = 5
-    V_bar_radius  = 10
-    V_font_size   = 15
-    V_font_family = 'Verdana'
-    
-    V_padY   = max(V_bar_radius, V_font_size * 1.33 / 2)
-    V_width  = 2 * (V_bar_radius + max(len(str(V_min_val)), len(str(V_max_val))) * V_font_size / 1.2)
-    V_height = 2 * (V_padY + V_bar_radius)
-    rs2 = RangeSliderV(root,
-                       [hVar3, hVar4],
-                       Width           = V_width,
-                       Height          = slider_height,
-                       min_val         = V_min_val,
-                       max_val         = V_max_val,
-                       padY            = V_padY,
-                       line_width      = V_line_width,
-                       bar_radius      = V_bar_radius,
-                       font_size       = V_font_size,
-                       font_family     = V_font_family,
-                       bar_color_inner = '#FFFFFF',
-                       bar_color_outer = '#61ba86',
-                       line_s_color    = '#000000',
-                       line_color      = '#808080',
-                       bgColor         = '#ECECEC',
-                       show_value      = False,
-                       digit_precision = '.0f')
-    
-    
-    
-#    rs2 = RangeSliderV(root,
-#                       [hVar3, hVar4],
-#                       Width           = slider_width,
-#                       Height          = slider_height,
-#                       min_val         = 0,
-#                       max_val         = matrix.shape[0] - 1,
-#                       padY            = pad_x,
-#                       line_width      = 5,
-#                       bar_radius      = 10,
-#                       bar_color_inner = '#FFFFFF',
-#                       bar_color_outer = '#be86e3',
-#                       line_s_color    = '#000000',
-#                       line_color      = '#808080',
-#                       bgColor         = '#ECECEC',
-#                       show_value      = False,
-#                       digit_precision = '.0f')
-    rs2.place(relheight = 0.8,
-              relwidth  = 0.1,
-              relx      = 0.0,
-              rely      = 0.1)
+    # ----- Horizontal pair: x bounds -----
+    X_Frame = tk.Frame(root, bg = scale_bg)
+    X_Frame.place(relheight = 0.10, relwidth = 0.80, relx = 0.10, rely = 0.90)
 
-    Limit_Label = tk.Label(root, font = SMALLFONT,
-                           fg = '#000000', bg = '#ECECEC')
+    x_lo_scale = tk.Scale(X_Frame, from_ = 0, to = x_max, orient = tk.HORIZONTAL,
+                          variable = hVar1, font = SMALLFONT, resolution = 1,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#61ba86', label = 'X1')
+    x_lo_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
+    x_hi_scale = tk.Scale(X_Frame, from_ = 0, to = x_max, orient = tk.HORIZONTAL,
+                          variable = hVar2, font = SMALLFONT, resolution = 1,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#61ba86', label = 'X2')
+    x_hi_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
+    # ----- Vertical pair: y bounds -----
+    Y_Frame = tk.Frame(root, bg = scale_bg)
+    Y_Frame.place(relheight = 0.80, relwidth = 0.14, relx = 0.00, rely = 0.10)
+
+    y_lo_scale = tk.Scale(Y_Frame, from_ = y_max, to = 0, orient = tk.VERTICAL,
+                          variable = hVar3, font = SMALLFONT, resolution = 1,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#be86e3', label = 'Y1')
+    y_lo_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
+    y_hi_scale = tk.Scale(Y_Frame, from_ = y_max, to = 0, orient = tk.VERTICAL,
+                          variable = hVar4, font = SMALLFONT, resolution = 1,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#be86e3', label = 'Y2')
+    y_hi_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
+    # ----- Window/level pair -----
+    Limit_Label = tk.Label(root, font = SMALLFONT, fg = scale_fg, bg = scale_bg)
     Limit_Label.config(text = 'Window \nLimit')
-    Limit_Label.place(relheight = 0.1,
-                      relwidth  = 0.1,
-                      relx      = 0.9,
-                      rely      = 0.1)
-    if matrix_type == 'SQUARE':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10 ) * 7
-    if matrix_type == 'TALL':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10 ) * 7
-    if matrix_type == 'LONG':
-        slider_width  = int(window_width / 10)
-        slider_height = int(window_height / 10) * 7
-        
-    V_min_val_2   = 0
-    V_max_val_2   = 1
-    V_line_width  = 5
-    V_bar_radius  = 10
-    V_font_size   = 15
-    V_font_family = 'Verdana'
-    
-    V_padY   = max(V_bar_radius, V_font_size * 1.33 / 2)
-    V_width  = 2 * (V_bar_radius + max(len(str(V_min_val_2)), len(str(V_max_val_2))) * V_font_size / 1.2)
-    V_height = 2 * (V_padY + V_bar_radius)
-    
-    rs3 = RangeSliderV(root,
-                       [hVar5, hVar6],
-                       Width           = V_width,
-                       Height          = slider_height,
-                       min_val         = 0,
-                       max_val         = 1,
-                       padY            = V_padY,
-                       line_width      = V_line_width,
-                       bar_radius      = V_bar_radius,
-                       font_size       = V_font_size,
-                       font_family     = V_font_family,
-                       bar_color_inner = '#FFFFFF',
-                       bar_color_outer = '#61ba86',
-                       line_s_color    = '#000000',
-                       line_color      = '#808080',
-                       bgColor         = '#ECECEC',
-                       show_value      = False,
-                       digit_precision = '.0f')
-#    rs3 = RangeSliderV(root,
-#                       [hVar5, hVar6],
-#                       Width           = slider_width,
-#                       Height          = slider_height,
-#                       min_val         = 0,
-#                       max_val         = 1,
-#                       padY            = pad_x,
-#                       line_width      = 5,
-#                       bar_radius      = 10,
-#                       bar_color_inner = '#FFFFFF',
-#                       bar_color_outer = '#000000',
-#                       line_s_color    = '#000000',
-#                       line_color      = '#808080',
-#                       bgColor         = '#ECECEC',
-#                       show_value      = True,
-#                       valueSide       = 'RIGHT',
-#                       digit_precision = '.2f',
-#                       font_family     = "Verdana",
-#                       font_size       = 15)
-    rs3.place(relheight = 0.7,
-              relwidth  = 0.1,
-              relx      = 0.9,
-              rely      = 0.2)
+    Limit_Label.place(relheight = 0.10, relwidth = 0.10, relx = 0.90, rely = 0.10)
+
+    W_Frame = tk.Frame(root, bg = scale_bg)
+    W_Frame.place(relheight = 0.70, relwidth = 0.10, relx = 0.90, rely = 0.20)
+
+    w_lo_scale = tk.Scale(W_Frame, from_ = 1.0, to = 0.0, orient = tk.VERTICAL,
+                          variable = hVar5, font = SMALLFONT, resolution = 0.01,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#808080', label = 'Min')
+    w_lo_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
+    w_hi_scale = tk.Scale(W_Frame, from_ = 1.0, to = 0.0, orient = tk.VERTICAL,
+                          variable = hVar6, font = SMALLFONT, resolution = 0.01,
+                          bg = scale_bg, fg = scale_fg, highlightthickness = 0,
+                          troughcolor = '#808080', label = 'Max')
+    w_hi_scale.pack(side = tk.LEFT, fill = tk.BOTH, expand = True)
+
     hVar1.trace_add('write', update_plots)
+    hVar2.trace_add('write', update_plots)
     hVar3.trace_add('write', update_plots)
+    hVar4.trace_add('write', update_plots)
     hVar5.trace_add('write', update_plots)
+    hVar6.trace_add('write', update_plots)
 
     Crop_Button = Button(root, text = "Crop", font = SMALLFONT,
                             fg = app_txt_col, bg = app_bkg_col, command = execute_crop)
@@ -438,9 +339,6 @@ def next_slice():
     dummy1.spines.right.set_visible(False)
 
     dummy_canvas1.draw()
-    hVar1.trace_add('write', update_plots)
-    hVar3.trace_add('write', update_plots)
-    hVar5.trace_add('write', update_plots)
 
 def finish_program():
     root.destroy()
@@ -475,3 +373,6 @@ def update_plots(var, index, mode):
     dummy1.spines.right.set_visible(False)
 
     dummy_canvas1.draw()
+
+def quit_program():
+    root.destroy()

@@ -4,7 +4,6 @@ def IntERVEIW_GUI(original_matrix):
     import matplotlib.pyplot                 as plt
     import numpy                             as np
     from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    from   RangeSlider.RangeSlider           import RangeSliderV
     from   screeninfo                        import get_monitors
 
     
@@ -93,17 +92,21 @@ def IntERVEIW_GUI(original_matrix):
     button_txt_col3 = '#B5C2D9'
 
     root.configure(bg = app_bkg_col)
-    #Get the current screen width and height
-    screen_width  = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
+
+   
+    try:
+        root.tk.call('tk', 'scaling', 1.0)
+    except Exception:
+        pass
+
+   
+    screen_width  = monitor_width
+    screen_height = monitor_height
     print(screen_width)
     print(screen_height)
-    scale_factor = 0.95
+    scale_factor = 0.75
 
-    if screen_width > screen_height:
-        screen_min = screen_height
-    if screen_width > screen_height:
-        screen_min = screen_height
+    screen_min = screen_height if screen_width >= screen_height else screen_width
     print(screen_min)
     if matrix_type == 'SQUARE':
         window_width  = int(screen_min * scale_factor)
@@ -118,7 +121,8 @@ def IntERVEIW_GUI(original_matrix):
     geometry_string = str(window_width) + 'x' + str(window_height) + '+0+0'
     print(geometry_string)
     root.geometry(geometry_string)
-    root.resizable(0, 0)
+    root.minsize(int(window_width * 0.5), int(window_height * 0.5))
+    root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
     root.title('INTeractive Enhanced Right Ventricular Insertions Estimate Widget')
 
     Image_Label = tk.Label(root, font = MEDIUMFONT,
@@ -675,3 +679,5 @@ def update_plots(val):
     dummy1.spines.right.set_visible(False)
 
     dummy_canvas1.draw()
+def quit_program():
+    root.destroy()
