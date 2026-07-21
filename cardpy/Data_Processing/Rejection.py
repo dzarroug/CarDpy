@@ -25,14 +25,49 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     import cv2                                                                                                                      #
     from   skimage.metrics           import structural_similarity as ssim                                                           # Import strutural similarity metric from skimage module
     from   skimage.metrics           import mean_squared_error    as mse                                                            #
-    from   yellowbrick.cluster       import KElbowVisualizer                                                                        #
+    from   kneed                     import KneeLocator                                                                         
     import matplotlib.style                                                                                                         #
     import matplotlib                as mpl                                                                                         #
     import matplotlib.pyplot         as plt                                                                                         #
     from   sklearn.cluster           import KMeans                                                                                  # Import K means clustering from sklearn module
     import itertools                                                                                                                #
     import math                                                                                                                     #
-    mpl.style.use('default')                                                                                                        #
+    mpl.style.use('default')      
+    
+    def _elbow_k(X, k_max, plot_title = None):
+        # Replaces yellowbrick's KElbowVisualizer (default: distortion metric +
+        # KneeLocator, convex/decreasing). Does the same as yellowbrick (fit bare KMeans() with
+        # sklearn's default n_init). Returns None if no elbow. 
+        from   sklearn.metrics       import pairwise_distances
+        from   sklearn.preprocessing import LabelEncoder
+        ks     = list(range(1, k_max))
+        scores = []
+        for k in ks:
+            km   = KMeans(n_clusters = k).fit(X)
+            le   = LabelEncoder(); le.fit(km.labels_)
+            dist = 0.0
+            for lab in le.classes_:
+                inst   = X[km.labels_ == lab]
+                center = np.array([inst.mean(axis = 0)])
+                dist  += (pairwise_distances(inst, center) ** 2).sum()
+            scores.append(dist)
+        if len(ks) < 2:
+            return None
+        elbow = KneeLocator(ks, scores, curve = 'convex', direction = 'decreasing').elbow
+        
+        # Reproduce yellowbrick's elbow plot: distortion score vs k, elbow marked.
+        fig = plt.figure(figsize = (10, 5))
+        fig.patch.set_facecolor('white')
+        plt.plot(ks, scores, marker = 'o', label = 'distortion score')
+        if elbow is not None:
+            plt.axvline(elbow, color = 'k', linestyle = '--', label = 'elbow at k = %d' % elbow)
+        if plot_title is not None:
+            plt.title(plot_title)
+        plt.xlabel('k')
+        plt.ylabel('distortion score')
+        plt.legend(loc = 1)
+        plt.show()
+        return elbow                                                                                       #
 
     ########## Initialize accepted matrix and address data type of stacked matrix #################################################################
     [original_matrix_stacked, original_bvals_stacked, original_bvecs_stacked] = sorted2stacked(original_matrix,
@@ -165,13 +200,8 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         tile_size = int(np.floor(30 / data.shape[0]))
         data_estimate = np.tile(data, (tile_size, 1))
         if data.shape[0] > 1:
-            model = KMeans()
-            visualizer = KElbowVisualizer(model, k = (1, data_estimate.shape[0] + 1), timings = False)
-            visualizer.fit(data_estimate)        # Fit data to visualizer
-            k_means_cluster.append(visualizer.elbow_value_)
-            plt.title('K-Means Estimate (Low $\it{b-value}$) for Slice %i' %int(slc + 1))
-            plt.legend(loc = 1)
-            plt.show()
+            _elbow_value = _elbow_k(data_estimate, data_estimate.shape[0] + 1, plot_title = 'K-Means Estimate (Low $\\it{b-value}$) for Slice %i' % int(slc + 1))
+            k_means_cluster.append(_elbow_value)
             NSSIM_AoA_post_list_temp = [i for i in NSSIM_AoA_post_list if i != 0]
             NRMSE_AoA_post_list_temp = [i for i in NRMSE_AoA_post_list if i != 0]
             if all(x >= NSSIM_threshold for x in NSSIM_AoA_post_list_temp) and all(x >= NRMSE_threshold for x in NRMSE_AoA_post_list_temp):                                           # If both lists are greater than or equal to respective thresholds ...
@@ -299,17 +329,13 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         NSSIM_AoA_post_list = NSSIM_AoA_post[:, slc].tolist()                                                                                                 # Convert NSSIM AoA for post automatic acquisition rejection to a list
         NRMSE_AoA_post_list = NRMSE_AoA_post[:, slc].tolist()                                                                                                 # Convert NRMSE AoA for post automatic acquisition rejection to a list
         data = np.hstack((NSSIM_AoA_post[:, slc, np.newaxis], NRMSE_AoA_post[:, slc, np.newaxis]))                                                  # Combine NSSIM AoA post and NRMSE AoA post into an [avg,2] shape
-        model = KMeans()
-        visualizer = KElbowVisualizer(model, k=(1, len(NSSIM_AoA_post_list) + 1), timings = False)
-        visualizer.fit(data)        # Fit data to visualizer
-        if visualizer.elbow_value_ < 6:
+        _elbow_value = _elbow_k(data, len(NSSIM_AoA_post_list) + 1, plot_title = 'K-Means Estimate (High $\\it{b-value}$) for Slice %i' % int(slc + 1))
+        # handles no elbow case now as well for security (can change if unwanted)
+        if _elbow_value is None or _elbow_value < 6:
             k_means_cluster.append(6)
             print('Overridding estimated number of clusters to be 5 clusters.')
         else:
-            k_means_cluster.append(visualizer.elbow_value_)
-        plt.title('K-Means Estimate (High $\it{b-value}$) for Slice %i' %int(slc + 1))
-        plt.legend(loc = 1)
-        plt.show()
+            k_means_cluster.append(_elbow_value)
         NSSIM_AoA_post_list_temp = [i for i in NSSIM_AoA_post_list if i != 0]
         NRMSE_AoA_post_list_temp = [i for i in NRMSE_AoA_post_list if i != 0]
         if all(x >= NSSIM_threshold for x in NSSIM_AoA_post_list_temp) and all(x >= NRMSE_threshold for x in NRMSE_AoA_post_list_temp):                                           # If both lists are greater than or equal to respective thresholds ...
@@ -420,7 +446,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
                 good_averages  = np.delete(all_averages, bad_averages)                                                                                                          # Identify indices of good averages
                 final_averages = all_averages
                 for idx in range(len(bad_averages)):                                                                                                                            # Iterate through indices of bad averages
-                    replacement_average               = np.random.choice(good_averages, 1)                                                                                          # Select random replacement index from indices of good averages
+                    replacement_average               = np.random.choice(good_averages, 1)[0]                                                                                          # Select random replacement index from indices of good averages
                     final_averages[bad_averages[idx]] = replacement_average                                                                                                         # Overwrite bad average index with random replacement average index
                 for avg in range(averages):                                                                                                                                     # Iterate through averages
                     accepted_matrix[:, :, slc, dif, avg]  = original_matrix[:, :, slc, dif, final_averages[avg]]                    # Overwrite bad average data with replacement average data in accepted matrix

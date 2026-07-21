@@ -119,7 +119,7 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
             for avg_i in range(averages):                                                                                                                   # Iterate through averages (ith average)
                 for avg_j in range(averages):                                                                                                                   # Iterate through averages (jth average)
                     SSIM[avg_i, avg_j, dif, slc] = np.round(ssim(entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_i],
-                                                                 entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_j]), 2)                                           # Calculate SSIM between ith and jth average
+                                                                 entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_j], data_range=2.0), 2)                                           # Calculate SSIM between ith and jth average
                     RMSE[avg_i, avg_j, dif, slc] = np.round(np.sqrt(mse(entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_i],
                                                                         entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_j])), 2)                                   # Calculate RMSE between ith and jth average
     ########## Assess respiratory motion across averages and resort averages ######################################################################
