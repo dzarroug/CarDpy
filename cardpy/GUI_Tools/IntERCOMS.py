@@ -45,7 +45,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     E1_Map     = primary_eigenvector
     cDTI_cmaps = cDTI_Colormaps_Generator()
     if Line_Width == None:
-        line_width = int(np.round(monitor_scale * 10))
+        line_width = 2
     else:
         line_width = Line_Width
     
@@ -97,8 +97,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
         print(str(m))
     monitor_height = m.height
     monitor_width  = m.width
-    monitor_scale  = monitor_width / 5120 * 30
-    monitor_scale  = monitor_width / 2560 * 30
+    monitor_scale  = 1.0
     LARGEFONT  = ("Verdana", int(np.round(monitor_scale * 35)))
     MEDIUMFONT = ("Verdana", int(np.round(monitor_scale * 25)))
     SMALLFONT  = ("Verdana", int(np.round(monitor_scale * 15)))
@@ -416,7 +415,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     Lowbval_Label.place(relheight = 0.025,
                         relwidth  = 0.4,
                         relx      = 0.575,
-                        rely      = 0.075)
+                        rely      = 0.050)
     
     Epi_Center_y  = int(matrix.shape[1]/2)
     Epi_Center_x  = int(matrix.shape[0]/2)
@@ -480,7 +479,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     dummy_canvas2.get_tk_widget().place(relheight = 0.4,
                                         relwidth  = 0.4,
                                         relx      = 0.575,
-                                        rely      = 0.575)
+                                        rely      = 0.590)
 
     Primary_E1_Label = tk.Label(root, font = MEDIUMFONT,
                                 fg = app_txt_col, bg = app_bkg_col)
@@ -510,10 +509,10 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     dummy5.spines.bottom.set_visible(False)
     dummy5.spines.right.set_visible(False)
     dummy_canvas3 = FigureCanvasTkAgg(dummy_figure3, root)
-    dummy_canvas3.get_tk_widget().place(relheight = 0.40,
+    dummy_canvas3.get_tk_widget().place(relheight = 0.36,
                                         relwidth  = 0.40,
                                         relx      = 0.025,
-                                        rely      = 0.575)
+                                        rely      = 0.60)
         
     if slc == matrix.shape[2] - 1:
         Finish_Button = Button(root, text = "Exit", font = SMALLFONT,

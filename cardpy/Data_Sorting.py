@@ -60,6 +60,16 @@ def stacked2sorted(stacked_matrix, stacked_bvals, stacked_bvecs):
     unique                  = unique[np.argsort(index)]                                                                 # Retain stacked diffusion direction order
     numDif                  = len(unique)                                                                               # Define number of diffusion directions
     numAvg                  = max(counts)                                                                               # Define number of averages
+    # Shape Consistency Check
+    numVolStacked = stacked_matrix.shape[3]                                                                             # Number of image volumes actually present
+    numVolExpected = numDif * numAvg                                                                                    # Number implied by the b-vector table
+    if numVolExpected != numVolStacked:
+        raise ValueError(
+            'stacked2sorted: shape mismatch between image data and b-value/b-vector files. '
+            'The image matrix has %d diffusion volumes, but the b-vectors expect %d directions x %d averages = %d volumes. '
+            'Check that the .bvals/.bvecs files match the image data.'
+            % (numVolStacked, numDif, numAvg, numVolExpected))
+    
     sorted_matrix           = np.zeros([numRow, numCol, numSlc, numDif, numAvg])                                        # Initialize sorted matrix
     ########## Address data type of stacked matrix #################################################################################################
     if stacked_matrix.dtype == 'complex128':                                                                            # If data type is complex ...

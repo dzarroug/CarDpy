@@ -28,7 +28,7 @@ def ADC_Filter(original_matrix, original_bvals, original_bvecs, operation_type =
     filtered_matrix = np.copy(original_matrix)                                                                                                      #
     temp_matrix     = np.abs(original_matrix)                                                                                                       #
     for dif in range(original_matrix.shape[3]):                                                                                                     #
-        if dif == bval_low_indicies:                                                                                                                    #
+        if dif in bval_low_indicies:                                                                                                                    #
             print('Low b value, nothing computed')                                                                                                          #
         else:                                                                                                                                           #
             for slc in range(original_matrix.shape[2]):                                                                                                     #

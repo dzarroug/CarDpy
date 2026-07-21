@@ -206,9 +206,9 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                 affine          = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
                                                   starting_affine = starting_affine)                                                                            # Initialize and perform affine registration
                 if (registration_algorithm == 'Elastic'):                                                                                                       # If registration algorithm is elastic ...
-                    metric               = SSDMetric(2)                                                                                                             # Define registration metric
+                    metric               = EMMetric(2) # Changed to be EDM instead of SSDMetric                                                                                                            # Define registration metric
                     level_iters          = [100, 50, 25]                                                                                                            # Define pyramid for iterations
-                    moving_elastic       = affine.transform(temporary_matrix[:, :, slc, dif, avg])                                                                  # Set moving image as affine registered temporary image
+                    moving_elastic       = affine.transform(temporary_matrix[:, :, slc, 0, avg]) # compare 1 b0 to other b0 avg                                                                 # Set moving image as affine registered temporary image
                     sdr                  = SymmetricDiffeomorphicRegistration(metric, level_iters)                                                                  # Initialize elastic registration
                     mapping              = sdr.optimize(static, moving_elastic)                                                                                     # Perform elastic registration
             ##### Apply registration across diffusion directions #####
