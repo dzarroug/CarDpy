@@ -1,0 +1,23 @@
+name: cardpy
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.14
+  - pip
+  - pip:
+      - numpy
+      - scipy
+      - matplotlib
+      - pydicom
+      - nibabel
+      - pynrrd
+      - opencv-python
+      - scikit-image
+      - scikit-learn
+      - dipy
+      - pandas
+      - screeninfo
+      - kneed
+      - tkmacosx
