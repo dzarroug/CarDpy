@@ -302,7 +302,7 @@ def Linear_Helix_Angle_Filtering(helix_angle, points_epicardium, points_endocard
     for idx in range(helix_angle_coordinates.shape[0]):
         x = helix_angle_coordinates[idx, 0]
         y = helix_angle_coordinates[idx, 1]
-        helix_angle_filtered[x, y] = helix_angle_measured[idx] * data_correction[idx]
+        helix_angle_filtered[x, y] = helix_angle_measured[idx][0] * data_correction[idx][0]
     return helix_angle_filtered
     
 def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, kernel_size = 5):
@@ -382,7 +382,7 @@ def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, k
         df = pd.DataFrame(unsorted_data_list[depth])
         df = df.sort_values(by = 5, axis = 0)
 
-        sorted_data = df.to_numpy()
+        sorted_data = df.to_numpy().copy()
         if depth < int(np.round(len(concentric_contours_list) * depth_factor)):
             print("Autoadjust Epicardium")
             test = np.nanmean(sorted_data[:, 3]) + 2 * np.std(sorted_data[:, 3])

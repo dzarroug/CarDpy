@@ -1,3 +1,43 @@
+def Myocardial_Mask_Contour_Filler(myocardial_mask, endocardial_cordinates, epicardial_cordinates):
+    import cv2
+    import numpy                 as     np
+    from   cardpy.Tools.Contours import Point2Pixel
+    
+    new_endocardial_x   = []
+    new_endocardial_y   = []
+    new_epicardial_x    = []
+    new_epicardial_y    = []
+    rows                = myocardial_mask.shape[0]
+    columns             = myocardial_mask.shape[1]
+    endocardial_contour = np.zeros([rows, columns])
+    for index in range(endocardial_cordinates[0].shape[0]):
+        [new_x_coordinate, new_y_coordinate] = Point2Pixel(epicardial_cordinates[0][index],  epicardial_cordinates[1][index])
+        new_epicardial_x.append(new_x_coordinate)
+        new_epicardial_y.append(new_y_coordinate)
+        [new_x_coordinate, new_y_coordinate] = Point2Pixel(endocardial_cordinates[0][index], endocardial_cordinates[1][index])
+        new_endocardial_x.append(new_x_coordinate)
+        new_endocardial_y.append(new_y_coordinate)
+
+    new_endocardium_points = [np.array(new_endocardial_x), np.array(new_endocardial_y)]
+    new_epicardium_points  = [np.array(new_epicardial_x),  np.array(new_epicardial_y)]
+
+    endocardial_points = np.hstack((new_endocardium_points[0][:, np.newaxis], new_endocardium_points[1][:, np.newaxis]))
+    epicardial_points  = np.hstack((new_epicardium_points[0][:, np.newaxis],  new_epicardium_points[1][:, np.newaxis]))
+    temp_matrix        = np.zeros([rows, columns])
+    endocardial_mask   = cv2.fillPoly(temp_matrix, np.int32([endocardial_points]), color=(255, 255, 255))
+    endocardial_mask   = endocardial_mask / 255
+    temp_matrix        = np.zeros([rows, columns])
+    epicardial_mask    = cv2.fillPoly(temp_matrix, np.int32([epicardial_points]),  color=(255, 255, 255))
+    epicardial_mask    = epicardial_mask / 255
+    
+    for index in range(endocardial_points.shape[0]):
+        x                         = endocardial_points[index, 0]
+        y                         = endocardial_points[index, 1]
+        endocardial_contour[y, x] = 1
+    filled_myocardial_mask = epicardial_mask - endocardial_mask + endocardial_contour
+    return filled_myocardial_mask
+
+
 def Myocardial_Mask_Contour_Extractor(myocardial_mask, slice_number):
     """
     ########## Definition Inputs ##################################################################################################################
