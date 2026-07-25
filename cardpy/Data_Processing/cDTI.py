@@ -384,7 +384,7 @@ def Spatial_Helix_Angle_Filtering(helix_angle, mask, wall_depth_factor = 0.25, k
 
         sorted_data = df.to_numpy().copy()
         if depth < int(np.round(len(concentric_contours_list) * depth_factor)):
-            print("Autoadjust Epicardium")
+            #print("Autoadjust Epicardium")
             test = np.nanmean(sorted_data[:, 3]) + 2 * np.std(sorted_data[:, 3])
             if test > 15:
                 test = 15

@@ -497,4 +497,4 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
                         accepted_matrix[:, :, slc, dif, 0] = temp_image_offset
         accepted_bvals  = original_bvals
         accepted_bvecs  = original_bvecs
-    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates] 
+    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates, stats, keep_matrix_sorted] 

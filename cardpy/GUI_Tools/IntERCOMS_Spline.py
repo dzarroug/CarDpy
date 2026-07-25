@@ -83,26 +83,22 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
             self.initialize_images()
             self.plot_images()
             self.epicardium_mouse_clicks  = []  # List to store epicardium mouse click data
-            self.is_epicardium_active     = True
-            self.epicardium_spline_id     = None  # ID for the epicardium spline line on the canvas
+            self.epicardium_spline_id     = None
             self.epicardium_spline_data   = []
+            self.epicardium_confirmed     = False
 
-            self.endocardium_mouse_clicks = []  # List to store endocardium mouse click data
-            self.is_endocardium_active    = False
-            self.endocardium_spline_id    = None  # ID for the endocardium spline line on the canvas
+            self.endocardium_mouse_clicks = []
+            self.endocardium_spline_id    = None
             self.endocardium_spline_data  = []
+            self.endocardium_confirmed    = False
 
-            self.is_antRVIP_active        = False    
             self.antRVIP_mouse_clicks     = []
             self.Anterior_RVIP            = []
 
-            self.is_infRVIP_active        = False  
             self.infRVIP_mouse_clicks     = []
             self.Inferior_RVIP            = []
 
-
-            # Bind the "d" key to the delete_previous_point method
-            self.bind("<KeyPress-d>", self.delete_previous_point)
+            self.active_stage = 'epi'   # one of: 'epi', 'endo', 'antRVIP', 'infRVIP'
 
         def add_buttons_and_instructions(self):
             # Add buttons for functionality
@@ -138,7 +134,24 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
                                                 bg      = app_bkg_col,
                                                 command = self.confirm_infRVIP)
             confirm_InfRVIP_button.pack(pady = 10)        
-            # Create the Delte Previous Point button
+            # Create the Delete Previous Point button
+            edit_epi_button = Button(self.left_frame, text = "Edit Epicardium",
+                                     font = ("Verdana", 20), fg = 'light green', bg = app_bkg_col,
+                                     command = lambda: self.set_stage('epi'))
+            edit_epi_button.pack(pady = 4)
+            edit_endo_button = Button(self.left_frame, text = "Edit Endocardium",
+                                      font = ("Verdana", 20), fg = 'red', bg = app_bkg_col,
+                                      command = lambda: self.set_stage('endo'))
+            edit_endo_button.pack(pady = 4)
+            edit_antRVIP_button = Button(self.left_frame, text = "Edit Anterior Insertion",
+                                         font = ("Verdana", 20), fg = 'cyan', bg = app_bkg_col,
+                                         command = lambda: self.set_stage('antRVIP'))
+            edit_antRVIP_button.pack(pady = 4)
+            edit_infRVIP_button = Button(self.left_frame, text = "Edit Inferior Insertion",
+                                         font = ("Verdana", 20), fg = 'magenta', bg = app_bkg_col,
+                                         command = lambda: self.set_stage('infRVIP'))
+            edit_infRVIP_button.pack(pady = 4)
+
             delete_previous_point_button = Button(self.left_frame, 
                                                   text = "Delete Last Point (d)", 
                                                   font    = ("Verdana", 20),
@@ -150,117 +163,92 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
             instructions_label = tk.Label(self.left_frame, 
                                           text = "Instructions:\nStep 1) Use the cDTI images to pick at least 4 epicardial points.\nStep 2) Select Confirm Epicardial Points button when completed.\nStep 3) Use the cDTI images to pick at least 4 endocardial points.\nStep 4) Select Confirm Endocardial Points button when completed.\n\nNotes:\n "                                     )
             instructions_label.pack(pady = 10)
-
+        def set_stage(self, stage):
+            # If returning to a confirmed contour stage, remove the duplicated closing point
+            if stage == 'epi' and self.epicardium_confirmed:
+                if len(self.epicardium_mouse_clicks) > 0:
+                    self.epicardium_mouse_clicks.pop()
+                for canvas in self.canvases:
+                    canvas.delete("epi_point_{}".format(len(self.epicardium_mouse_clicks) + 1))
+                self.epicardium_confirmed = False
+            if stage == 'endo' and self.endocardium_confirmed:
+                if len(self.endocardium_mouse_clicks) > 0:
+                    self.endocardium_mouse_clicks.pop()
+                for canvas in self.canvases:
+                    canvas.delete("endo_point_{}".format(len(self.endocardium_mouse_clicks) + 1))
+                self.endocardium_confirmed = False
+            self.active_stage = stage
+            if self.canvases:
+                self.canvases[0].focus_set()
+        
         def delete_previous_point(self, event=None):
-            ### Epi
-            if self.is_epicardium_active == True:
+            if self.active_stage == 'epi':
                 if self.epicardium_mouse_clicks:
-                    # Remove the last point from the stored clicks
-                    deleted_epicardium_point = self.epicardium_mouse_clicks.pop()
-
-                    # Remove the markers from all canvases
+                    self.epicardium_mouse_clicks.pop()
                     for canvas in self.canvases:
-                        canvas.delete("epi_point_{}".format(len(self.epicardium_mouse_clicks) + 1))  # Unique tag for each point
-
-                    # Clear existing epicardium spline
+                        canvas.delete("epi_point_{}".format(len(self.epicardium_mouse_clicks) + 1))
                     self.clear_epicardium_spline()
-
-                    # Redraw epicardium spline if there are at least four points
                     if len(self.epicardium_mouse_clicks) >= 4:
                         self.draw_epicardium_spline()
-            ### Endo
-            if self.is_endocardium_active == True:
+            elif self.active_stage == 'endo':
                 if self.endocardium_mouse_clicks:
-                    # Remove the last point from the stored clicks
-                    deleted_endocardium_point = self.endocardium_mouse_clicks.pop()
-
-                    # Remove the markers from all canvases
+                    self.endocardium_mouse_clicks.pop()
                     for canvas in self.canvases:
-                        canvas.delete("endo_point_{}".format(len(self.endocardium_mouse_clicks) + 1))  # Unique tag for each point
-
-                    # Clear existing epicardium spline
+                        canvas.delete("endo_point_{}".format(len(self.endocardium_mouse_clicks) + 1))
                     self.clear_endocardium_spline()
-
-                    # Redraw epicardium spline if there are at least four points
                     if len(self.endocardium_mouse_clicks) >= 4:
                         self.draw_endocardium_spline()
+            elif self.active_stage == 'antRVIP':
+                if self.antRVIP_mouse_clicks:
+                    self.antRVIP_mouse_clicks.pop()
+                    for canvas in self.canvases:
+                        canvas.delete("antRVIP_point_{}".format(len(self.antRVIP_mouse_clicks) + 1))
+            elif self.active_stage == 'infRVIP':
+                if self.infRVIP_mouse_clicks:
+                    self.infRVIP_mouse_clicks.pop()
+                    for canvas in self.canvases:
+                        canvas.delete("infRVIP_point_{}".format(len(self.infRVIP_mouse_clicks) + 1))
 
         def confirm_epicardium(self):
             if len(self.epicardium_mouse_clicks) >= 4:
                 first_point = self.epicardium_mouse_clicks[0]
                 self.epicardium_mouse_clicks.append(first_point)
-
-                # Plot a marker at the first point on all canvases
                 for canvas, data in zip(self.canvases, self.data):
                     scaled_x = (first_point[0] * (canvas.winfo_width() / data.shape[1]))
                     scaled_y = (first_point[1] * (canvas.winfo_height() / data.shape[0]))
                     canvas.create_oval(scaled_x - 5, scaled_y - 5, scaled_x + 5, scaled_y + 5, fill = "light green", tags = "epi_point_{}".format(len(self.epicardium_mouse_clicks)))
-
-                # Clear existing spline and draw new spline
                 self.clear_epicardium_spline()
                 self.draw_epicardium_spline()
-                self.is_epicardium_active  = False
-                self.is_endocardium_active = True
-                self.is_antRVIP_active     = False
-                self.is_infRVIP_active     = False
-                # Call get_spline_data to retrieve the spline data
-                spline_data0 = self.get_epicardium_spline_data()
-    #             print("Endocardium Spline Data:", spline_data0)
-    #             app.get_epicardium_spline_data()
+                self.epicardium_confirmed = True
+                self.active_stage = 'endo'
+                self.get_epicardium_spline_data()
 
         def confirm_endocardium(self):
             if len(self.endocardium_mouse_clicks) >= 4:
                 first_point = self.endocardium_mouse_clicks[0]
                 self.endocardium_mouse_clicks.append(first_point)
-
-                # Plot a marker at the first point on all canvases
                 for canvas, data in zip(self.canvases, self.data):
                     scaled_x = (first_point[0] * (canvas.winfo_width() / data.shape[1]))
                     scaled_y = (first_point[1] * (canvas.winfo_height() / data.shape[0]))
                     canvas.create_oval(scaled_x - 5, scaled_y - 5, scaled_x + 5, scaled_y + 5, fill = "red", tags = "endo_point_{}".format(len(self.endocardium_mouse_clicks)))
-
-                # Clear existing spline and draw new spline
                 self.clear_endocardium_spline()
                 self.draw_endocardium_spline()
-                self.is_epicardium_active  = False
-                self.is_endocardium_active = False
-                self.is_antRVIP_active     = True
-                self.is_infRVIP_active     = False
-                # Call get_spline_data to retrieve the spline data
-                spline_data1 = self.get_endocardium_spline_data()
-    #             print("Epicardium Spline Data:", spline_data1)
-    #             endocardium_spline = self.get_endocardium_spline_data()
+                self.endocardium_confirmed = True
+                self.active_stage = 'antRVIP'
+                self.get_endocardium_spline_data()
 
                 # Optionally, you can do something with the spline_data, such as updating a display or saving it.
         def confirm_antRVIP(self):
-            # Plot a marker at the first point on all canvases
-    #         for canvas, data in zip(self.canvases, self.data):
-    #             scaled_x = int(first_point[0] * (canvas.winfo_width() / data.shape[1]))
-    #             scaled_y = int(first_point[1] * (canvas.winfo_height() / data.shape[0]))
-    #             canvas.create_oval(scaled_x - 5, scaled_y - 5, scaled_x + 5, scaled_y + 5, fill = "cyan", tags = "antRVIP_point_{}".format(len(self.antRVIP_mouse_clicks)))
-
-            # Clear existing spline and draw new spline
-            self.is_epicardium_active  = False
-            self.is_endocardium_active = False
-            self.is_antRVIP_active     = False
-            self.is_infRVIP_active     = True
-            self.Anterior_RVIP         = self.antRVIP_mouse_clicks[-1]
+            if len(self.antRVIP_mouse_clicks) < 1:
+                return
+            self.Anterior_RVIP = self.antRVIP_mouse_clicks[-1]
+            self.active_stage  = 'infRVIP'
 
         def confirm_infRVIP(self):
-            # Plot a marker at the first point on all canvases
-    #         for canvas, data in zip(self.canvases, self.data):
-    #             scaled_x = int(first_point[0] * (canvas.winfo_width() / data.shape[1]))
-    #             scaled_y = int(first_point[1] * (canvas.winfo_height() / data.shape[0]))
-    #             canvas.create_oval(scaled_x - 5, scaled_y - 5, scaled_x + 5, scaled_y + 5, fill = "cyan", tags = "infRVIP_point_{}".format(len(self.infRVIP_mouse_clicks)))
-
-            # Clear existing spline and draw new spline
-            self.is_epicardium_active  = False
-            self.is_endocardium_active = False
-            self.is_antRVIP_active     = False
-            self.is_infRVIP_active     = False
-            self.Inferior_RVIP         = self.infRVIP_mouse_clicks[-1]
-
-
+            if len(self.infRVIP_mouse_clicks) < 1:
+                return
+            self.Inferior_RVIP = self.infRVIP_mouse_clicks[-1]
+            self.active_stage  = 'done'
 
         def clear_epicardium_spline(self):
             if self.epicardium_spline_id is not None:
@@ -317,55 +305,37 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
                 for canvas in self.canvases:
                     canvas.create_line(spline_endocardium_coords, fill = "red", width = 2, tags = "endo_spline")
                 self.endocardium_spline_id = "endo_spline"
+
         def get_epicardium_spline_data(self):
             if len(self.epicardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.epicardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                tck, _             = splprep([x_points, y_points], s = 0)
                 u                  = np.linspace(0, 1, num = 200)
                 x_spline, y_spline = splev(u, tck)
-
-                # Convert spline coordinates to image matrix coordinates
-                canvas_width              = self.canvases[0].winfo_width()
-                canvas_height             = self.canvases[0].winfo_height()
-                image_width, image_height = self.data[0].shape[::-1]
-                x_ratio                   = image_width / canvas_width 
-                y_ratio                   = image_height / canvas_height 
-                scaled_x_spline           = [(x * x_ratio) for x in x_spline]
-                scaled_y_spline           = [(y * y_ratio) for y in y_spline]
-
-                # Zip scaled_x_spline and scaled_y_spline to provide pairs of coordinates for create_line
                 spline_epicardium_coords = list(zip(x_spline, y_spline))
-                self.epicardium_spline_data.append(spline_epicardium_coords)
+                # Store at index 0, overwriting any previous contour so that
+                # editing + re-confirming replaces rather than appends.
+                self.epicardium_spline_data = [spline_epicardium_coords]
             else:
-                self.epicardium_spline_data.append(None)
+                self.epicardium_spline_data = [None]
             return self.epicardium_spline_data
-        def get_endocardium_spline_data(self):            
+
+        def get_endocardium_spline_data(self):
             if len(self.endocardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.endocardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                tck, _             = splprep([x_points, y_points], s = 0)
                 u                  = np.linspace(0, 1, num = 200)
                 x_spline, y_spline = splev(u, tck)
-    #             print(x_spline, y_spline)
-
-                # Convert spline coordinates to image matrix coordinates
-                canvas_width              = self.canvases[0].winfo_width()
-                canvas_height             = self.canvases[0].winfo_height()
-                image_width, image_height = self.data[0].shape[::-1]
-                x_ratio                   = image_width / canvas_width
-                y_ratio                   = image_height / canvas_height
-                scaled_x_spline           = [(x * x_ratio) for x in x_spline]
-                scaled_y_spline           = [(y * y_ratio) for y in y_spline]
-
-                # Zip scaled_x_spline and scaled_y_spline to provide pairs of coordinates for create_line
                 spline_endocardium_coords = list(zip(x_spline, y_spline))
-                self.endocardium_spline_data.append(spline_endocardium_coords)
+                self.endocardium_spline_data = [spline_endocardium_coords]
             else:
-                self.endocardium_spline_data.append(None)
+                self.endocardium_spline_data = [None]
             return self.endocardium_spline_data
 
         def on_canvas_click(self, event):
             canvas = event.widget  # Get the canvas where the click occurred
             idx = self.canvases.index(canvas)  # Get the index of the canvas in the list
+            canvas.focus_set()
 
             # Convert monitor coordinates to image matrix coordinates
             canvas_width  = canvas.winfo_width()
@@ -380,7 +350,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
             image_y = (event.y * y_ratio)
 
             ### Epi
-            if self.is_epicardium_active == True:
+            if self.active_stage == 'epi':
                 # Append the click coordinates and timestamp to the list
                 self.epicardium_mouse_clicks.append((image_x, image_y))
 
@@ -397,7 +367,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
                 if len(self.epicardium_mouse_clicks) >= 4:
                     self.draw_epicardium_spline()
             ### Endo
-            if self.is_endocardium_active == True:
+            if self.active_stage == 'endo':
                 # Append the click coordinates and timestamp to the list
                 self.endocardium_mouse_clicks.append((image_x, image_y))
 
@@ -414,7 +384,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
                 if len(self.endocardium_mouse_clicks) >= 4:
                     self.draw_endocardium_spline()
             ### Anterior RVIP
-            if self.is_antRVIP_active == True:
+            if self.active_stage == 'antRVIP':
                 # Append the click coordinates and timestamp to the list
                 self.antRVIP_mouse_clicks.append((image_x, image_y))
 
@@ -426,7 +396,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
                                        fill = "cyan", 
                                        tags = "antRVIP_point_{}".format(len(self.antRVIP_mouse_clicks)))  
             ### Inferior RVIP
-            if self.is_infRVIP_active == True:
+            if self.active_stage == 'infRVIP':
                 # Append the click coordinates and timestamp to the list
                 self.infRVIP_mouse_clicks.append((image_x, image_y))
 
@@ -440,7 +410,6 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
 
         def initialize_images(self):
             self.data      = [avg_diff_image, ADC_image, np.abs(E1_image)]
-            self.titles    = ["Mean Diffusion Image", "Mean Diffusivity Map", "Primary Eigenvector Map"]
             self.colormaps = [
                               ("gray", Normalize(vmin=self.data[0].min(), vmax=self.data[0].max() * 0.75)),
                               (cDTI_cmaps['MD'], Normalize(vmin=self.data[1].min(), vmax=self.data[1].max())),
@@ -471,6 +440,8 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
 
                 # Bind mouse click event to all canvases
                 canvas.bind("<Button-1>", self.on_canvas_click)
+                canvas.bind("<KeyPress-d>", self.delete_previous_point)
+                canvas.config(takefocus = True)
 
         def plot_images(self):
             for idx, (canvas, data, (cmap_name, norm)) in enumerate(zip(self.canvases, self.data, self.colormaps)):

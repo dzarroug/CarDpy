@@ -60,7 +60,7 @@ Start with 01_Data_Processing then run 02_Post-Processing Using Healthy_Voluntee
         - call the GUI an additional time to do a "whole-heart crop" which maybe useful for segmenntation
     - intermediate k-means clustering and rejection images that currently pop up (instead can be saved as a .png as diagnostic)
     - data on the # images that were rejected (not just the percentages)
-    - store index of rejected images 
+    - store index of rejected images
 - move cardpy to pip! 
 
 
