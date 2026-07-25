@@ -1,0 +1,17 @@
+numpy<3.0,>=2.0
+pandas
+scipy
+matplotlib>=3.9
+pydicom
+nibabel
+pynrrd
+opencv-python
+scikit-image>=0.26
+scikit-learn
+dipy<2.0,>=1.12
+screeninfo
+kneed
+pillow
+
+[macos]
+tkmacosx

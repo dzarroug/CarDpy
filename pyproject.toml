@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cardpy"
+version = "0.1.0"
+description = "CarDpy: Cardiac Diffusion in Python — a cardiac DTI post-processing toolbox."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Tyler E. Cork" },
+]
+dependencies = [
+    "numpy>=2.0,<3.0",
+    "pandas",
+    "scipy",
+    "matplotlib>=3.9",
+    "pydicom",
+    "nibabel",
+    "pynrrd",
+    "opencv-python",
+    "scikit-image>=0.26",
+    "scikit-learn",
+    "dipy>=1.12,<2.0",
+    "screeninfo",
+    "kneed",
+    "pillow",
+]
+
+[project.optional-dependencies]
+macos = ["tkmacosx"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cardpy*"]
