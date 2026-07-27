@@ -55,4 +55,10 @@ DOI: https://doi.org/10.1007/978-3-031-94562-5_13
 - GUI updates for usability 
 - manual rejection tool to see all the images and click on one to reject
 - version of cardpy calls that is not jupyter notebook --> have a config file and use that to determine what steps to use
+- windows testing 
 
+
+## Proposed Merges with Tyler
+- New registration WIP
+- New Gibb's Ringing Correction 
+- New data loading algorithm
