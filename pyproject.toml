@@ -35,3 +35,6 @@ macos = ["tkmacosx"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cardpy*"]
+
+[tool.setuptools.package-data]
+cardpy = ["Colormaps_data/*.txt"]

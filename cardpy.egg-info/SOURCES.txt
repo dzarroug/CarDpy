@@ -12,6 +12,13 @@ cardpy.egg-info/SOURCES.txt
 cardpy.egg-info/dependency_links.txt
 cardpy.egg-info/requires.txt
 cardpy.egg-info/top_level.txt
+cardpy/Colormaps_data/Absolute_E2_Angle.txt
+cardpy/Colormaps_data/E2_Angle.txt
+cardpy/Colormaps_data/Fractional_Anisotropy.txt
+cardpy/Colormaps_data/Helix_Angle.txt
+cardpy/Colormaps_data/Mean_Diffusivity.txt
+cardpy/Colormaps_data/Mode.txt
+cardpy/Colormaps_data/Transverse_Angle.txt
 cardpy/Data_Processing/Averaging.py
 cardpy/Data_Processing/DTI.py
 cardpy/Data_Processing/DWI.py
