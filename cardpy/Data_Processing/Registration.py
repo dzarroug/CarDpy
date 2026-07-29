@@ -80,7 +80,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                 ##### Initialize registration metric #####
                 nbins         = 32                                                                                                                              # Set number of bins for mutual information metric
                 sampling_prop = None                                                                                                                            # Set sampling property
-                metric        = MutualInformationMetric(nbins, sampling_prop)                                                                                   # Define registration metric
+                metric        = MutualInformationMetric(nbins=nbins, sampling_proportion=sampling_prop)                                                                                   # Define registration metric
                 level_iters   = [10000, 1000, 100]                                                                                                           # Define pyramid for iterations
                 sigmas        = [3.0,    2.0,   0.0]                                                                                                            # Define pyramid for sigmas
                 factors       = [2,      1,     1]                                                                                                              # Define pyramid for factors
@@ -89,7 +89,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                 transform       = TranslationTransform2D()                                                                                                      # Define transformation as translation
                 params0         = None                                                                                                                          # Define parameters
                 starting_affine = c_of_mass.affine                                                                                                              # Choose starting registration transformation from center of mass transformation
-                translation     = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+                translation     = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                                   starting_affine = starting_affine)                                                                            # Initialize and perform translation registration
                 if registration_algorithm == 'Translation':                                                                                                     # If registration algorithm is translation ...
                     if temporary_denoising == 'ON':                                                                                                                 # If temporary denoising is on ...
@@ -106,7 +106,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                     transform       = RigidTransform2D()                                                                                                            # Define transformation as rigid
                     params0         = None                                                                                                                          # Define parameters
                     starting_affine = translation.affine                                                                                                            # Choose starting registration transformation from translation transformation
-                    rigid           = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+                    rigid           = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                                       starting_affine = starting_affine)                                                                            # Initialize and perform rigid registration
                     if registration_algorithm == 'Rigid':                                                                                                           # If registration algorithm is rigid ...
                         if temporary_denoising == 'ON':                                                                                                                 # If temporary denoising is on ...
@@ -123,7 +123,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
                         transform       = AffineTransform2D()                                                                                                           # Define transformation as affine
                         params0         = None                                                                                                                          # Define parameters
                         starting_affine = rigid.affine                                                                                                                  # Choose starting registration transformation from rigid transformation
-                        affine          = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+                        affine          = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                                           starting_affine = starting_affine)                                                                            # Initialize and perform affine registration
                         if temporary_denoising == 'ON':                                                                                                                 # If temporary denoising is on ...
                             transformed_denoised = affine.transform(temporary_matrix[:, :, slc, dif, avg])                                                                  # Apply and store affine registered denoised image
@@ -180,7 +180,7 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
             ##### Initialize registration metric #####
             nbins         = 32                                                                                                                              # Set number of bins for mutual information metric
             sampling_prop = None                                                                                                                            # Set sampling property
-            metric        = MutualInformationMetric(nbins, sampling_prop)                                                                                   # Define registration metric
+            metric        = MutualInformationMetric(nbins=nbins, sampling_proportion=sampling_prop)                                                                                   # Define registration metric
             level_iters   = [10000, 1000, 100]                                                                                                           # Define pyramid for iterations
             sigmas        = [3.0,    2.0,   0.0]                                                                                                            # Define pyramid for sigmas
             factors       = [2,      1,     1]                                                                                                              # Define pyramid for factors
@@ -189,21 +189,21 @@ def register(original_matrix, original_bvals, original_bvecs, registration_algor
             transform       = TranslationTransform2D()                                                                                                      # Define transformation as translation
             params0         = None                                                                                                                          # Define parameters
             starting_affine = c_of_mass.affine                                                                                                              # Choose starting registration transformation from center of mass transformation
-            translation     = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+            translation     = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                               starting_affine = starting_affine)                                                                            # Initialize and perform translation registration
             ##### Rigid transform in 2D #####
             if (registration_algorithm == 'Rigid' or registration_algorithm == 'Affine' or registration_algorithm == 'Elastic'):                            # If registration algorithm is rigid, affine, or elastic ...
                 transform       = RigidTransform2D()                                                                                                            # Define transformation as rigid
                 params0         = None                                                                                                                          # Define parameters
                 starting_affine = translation.affine                                                                                                            # Choose starting registration transformation from translation transformation
-                rigid           = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+                rigid           = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                                   starting_affine = starting_affine)                                                                            # Initialize and perform rigid registration
             ##### Affine transform in 2D #####
             if (registration_algorithm == 'Affine' or registration_algorithm == 'Elastic'):                                                                 # If registration algorithm is affine or elastic ...
                 transform       = AffineTransform2D()                                                                                                           # Define transformation as affine
                 params0         = None                                                                                                                          # Define parameters
                 starting_affine = rigid.affine                                                                                                                  # Choose starting registration transformation from rigid transformation
-                affine          = affreg.optimize(static, moving, transform, params0, static_grid2world, moving_grid2world,
+                affine          = affreg.optimize(static, moving, transform, params0, static_grid2world=static_grid2world, moving_grid2world=moving_grid2world,
                                                   starting_affine = starting_affine)                                                                            # Initialize and perform affine registration
                 if (registration_algorithm == 'Elastic'):                                                                                                       # If registration algorithm is elastic ...
                     metric               = EMMetric(2) # Changed to be EDM instead of SSDMetric                                                                                                            # Define registration metric

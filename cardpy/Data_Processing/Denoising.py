@@ -98,7 +98,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
     ########## Local PCA denoising ################################################################################################################
     if denoising_algorithm == 'LocalPCA':                                                                                           # If Local PCA is selected ...
         print('Denoising images using Local PCA via empirical thresholds.')                                                             # Print which algorithm is selected
-        gtab   = gradient_table(stacked_bvals, stacked_bvecs)                                                                           # Create gradient table from b-values and b-vectors
+        gtab   = gradient_table(stacked_bvals, bvecs=stacked_bvecs)                                                                           # Create gradient table from b-values and b-vectors
         slices = stacked_matrix.shape[2]                                                                                                # Extract number of slices
         if operation_type == 'Complex':                                                                                                 # If data type is complex ...
             for slc in range(slices):                                                                                                       # Iterate through slices
@@ -122,7 +122,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
                 tmp_matrix   = tmp_matrix[:, :, np.newaxis, :]                                                                                  # Insert new axis as magnitude matrix has compressed
                 tmp_matrix   = np.repeat(tmp_matrix, 5, axis = 2)                                                                               # Pad array with repeats of the selected slice
                 sigma_mag    = pca_noise_estimate(tmp_matrix, gtab, correct_bias = True, smooth = 2)                                            # Set sigma for local PCA denoising using magnitude matrix
-                tmp_denoised = localpca(tmp_matrix, sigma_mag, tau_factor = 2.3, patch_radius = 2)                                              # Run Local PCA for magnitude data
+                tmp_denoised = localpca(tmp_matrix, sigma=sigma_mag, tau_factor = 2.3, patch_radius = 2)                                              # Run Local PCA for magnitude data
                 denoised_matrix[:, :, slc, :] = tmp_denoised[:, :, 2, :]                                                                        # Store selected denoised magnitude slice
     ########## Tie-up-loose-ends ... ##############################################################################################################
     [denoised_matrix, _, _] = stacked2sorted(denoised_matrix, stacked_bvals, stacked_bvecs)                                         # Convert stacked data into sorted data

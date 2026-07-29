@@ -73,7 +73,7 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
     radial_diffusivity_list    = []
     for slc in range(slices):
         ########## Model, fit, and derive diffusion tensor ############################################################################################
-        gtable   = gradient_table(bvals_slices_list[slc], bvecs_slices_list[slc])                                           # Create gradient table from b-values and b-vectors
+        gtable   = gradient_table(bvals_slices_list[slc], bvecs=bvecs_slices_list[slc])                                           # Create gradient table from b-values and b-vectors
         tenmodel = dti.TensorModel(gtab = gtable, fit_method = tensor_fit)                                                  # Create tensor model from gradient table and tensor fit
         tenfit   = tenmodel.fit(matrix_slices_list[slc])                                                                    # Fit diffusion data to tensor model
         Tensor   = tenfit.quadratic_form                                                                                    # Extract tensor from fitted tensor model
