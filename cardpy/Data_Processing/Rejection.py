@@ -74,7 +74,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.legend(loc = 1)
         if save_path is not None:
             fig.savefig(save_path, dpi = 150, bbox_inches = 'tight')
-        plt.show()
+        plt.close(fig)
         return elbow                                                                                       #
 
     ########## Initialize accepted matrix and address data type of stacked matrix #################################################################
@@ -205,7 +205,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         tile_size = int(np.floor(30 / data.shape[0]))
         data_estimate = np.tile(data, (tile_size, 1))
         if data.shape[0] > 1:
-            _elbow_value = _elbow_k(data_estimate, data_estimate.shape[0] + 1, plot_title = 'K-Means Estimate (Low $\\it{b-value}$) for Slice %i  —  X out to Continue' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_LowB_Slice_%02d.png' % int(slc + 1)))
+            _elbow_value = _elbow_k(data_estimate, data_estimate.shape[0] + 1, plot_title = 'K-Means Estimate (Low $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_LowB_Slice_%02d.png' % int(slc + 1)))
             k_means_cluster.append(_elbow_value)
             NSSIM_AoA_post_list_temp = [i for i in NSSIM_AoA_post_list if i != 0]
             NRMSE_AoA_post_list_temp = [i for i in NRMSE_AoA_post_list if i != 0]
@@ -272,7 +272,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
 
         plt.axhline(NRMSE_threshold, color = 'red', label = 'NRMSE Threshold')
         plt.axvline(NSSIM_threshold, color = 'blue', label = 'NSSIM Threshold')
-        plt.title(r'K-Means Cluster Assignemnts (Low $\it{b-value}$) for Slice %i  —  X out to Continue' %int(slc + 1))
+        plt.title(r'K-Means Cluster Assignemnts (Low $\it{b-value}$) for Slice %i' %int(slc + 1))
         plt.plot(k_means.cluster_centers_[:,0], k_means.cluster_centers_[:,1], 'gx', label = 'Cluster Centers')
         plt.legend(loc = 8)
         plt.xlabel('NSSIM')
@@ -280,7 +280,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.xlim([-0.1, 1.1])
         plt.ylim([-0.1, 1.1])
         fig.savefig(os.path.join(_diag_dir, 'KMeans_Clusters_LowB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
-        plt.show()
+        plt.close(fig)
     ########## High b-value rejection ##############################################################################################################
     SSIM_bvh_v_bvh  = np.zeros([len(bval_high_indicies), len(bval_high_indicies), slices])                                                                                # Initialize structure similarity index measure (SSIM) for low b-value comparison matrix
     NSSIM_bvh_v_bvh = np.zeros([len(bval_high_indicies), len(bval_high_indicies), slices])                                                                                # Initialize normalized SSIM (NSSIM) for low b-value comparison matrix
@@ -335,7 +335,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         NSSIM_AoA_post_list = NSSIM_AoA_post[:, slc].tolist()                                                                                                 # Convert NSSIM AoA for post automatic acquisition rejection to a list
         NRMSE_AoA_post_list = NRMSE_AoA_post[:, slc].tolist()                                                                                                 # Convert NRMSE AoA for post automatic acquisition rejection to a list
         data = np.hstack((NSSIM_AoA_post[:, slc, np.newaxis], NRMSE_AoA_post[:, slc, np.newaxis]))                                                  # Combine NSSIM AoA post and NRMSE AoA post into an [avg,2] shape
-        _elbow_value = _elbow_k(data, len(NSSIM_AoA_post_list) + 1, plot_title = 'K-Means Estimate (High $\\it{b-value}$) for Slice %i  —  X out to Continue' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_HighB_Slice_%02d.png' % int(slc + 1)))
+        _elbow_value = _elbow_k(data, len(NSSIM_AoA_post_list) + 1, plot_title = 'K-Means Estimate (High $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_HighB_Slice_%02d.png' % int(slc + 1)))
         # handles no elbow case now as well for security (can change if unwanted)
         if _elbow_value is None or _elbow_value < 6:
             k_means_cluster.append(6)
@@ -399,7 +399,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.scatter(NSSIM_AoA_post[:, slc], NRMSE_AoA_post[:, slc], c = kmeans_labels[:, slc], marker = 'o')
         plt.axhline(NRMSE_threshold, color = 'red', label = 'NRMSE Threshold')
         plt.axvline(NSSIM_threshold, color = 'blue', label = 'NSSIM Threshold')
-        plt.title(r'K-Means Cluster Assignemnts (High $\it{b-value}$) for Slice %i  —  X out to Continue' %int(slc + 1))
+        plt.title(r'K-Means Cluster Assignemnts (High $\it{b-value}$) for Slice %i' %int(slc + 1))
         plt.plot(k_means.cluster_centers_[:,0], k_means.cluster_centers_[:,1], 'gx', label = 'Cluster Centers')
         plt.legend(loc=8)
         plt.xlabel('NSSIM')
@@ -407,7 +407,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.xlim([-0.1, 1.1])
         plt.ylim([-0.1, 1.1])
         fig.savefig(os.path.join(_diag_dir, 'KMeans_Clusters_HighB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
-        plt.show()
+        plt.close(fig)
     keep_matrix_stacked = np.zeros([original_matrix_stacked.shape[2], original_matrix_stacked.shape[3]])
     for slc in range(keep_bvl_matrix.shape[1]):
         for acquisition in range(keep_bvl_matrix.shape[0]):

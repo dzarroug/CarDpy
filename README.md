@@ -20,6 +20,7 @@ Install **CarDpy** with:
 ```bash
 pip install "cardpy[macos] @ git+https://github.com/dzarroug/CarDpy.git@dev"
 ```
+Delete [macos] if not using Mac. 
 
 ### Run the pipeline! 
 Start with 01_Data_Processing then run 02_Post-Processing Using Healthy_Volunteer_07 Dataset 
@@ -43,21 +44,19 @@ DOI: https://doi.org/10.1007/978-3-031-94562-5_13
 ---
 
 ## Ongoing Tasks
-- Update so warnings are mitigated 
-- Add in output folder Diagnostics sub-folder that includes
-    - store crop heart coordinates
-        - call the GUI an additional time to do a "whole-heart crop" which maybe useful for segmenntation
-    - intermediate k-means clustering and rejection images that currently pop up (instead can be saved as a .png as diagnostic)
-    - data on the # images that were rejected (not just the percentages)
-    - store index of rejected images
-- refine pip install set-up
-    - pip install "cardpy[macos]"
-
+When possible:
 - Add automated segmentation GUI with Sascha's model
-- GUI updates for usability 
-- manual rejection tool to see all the images and click on one to reject
-- version of cardpy calls that is not jupyter notebook --> have a config file and use that to determine what steps to use
-- windows testing 
+- windows testing
+
+Action Tasks:
+4 - call the GUI an additional time to do a "whole-heart crop" which maybe useful for segmenntation
+    -  Zooming, drag to resize
+5 - GUI updates for usability 
+3 - manual rejection tool to see all the images and click on one to reject
+1 - stop pop ups for plots
+2 - version of cardpy calls that is not jupyter notebook --> have a config file and use that to determine what steps to use
+    - refine pip install set-up (pypi)
+ 
 
 
 ## Proposed Merges with Tyler
