@@ -83,7 +83,7 @@ DEFAULT_CONFIG = {
         },
     },
 
-    ### ---- Output ----
+    ### ---- Output ---
     "output": {
         "save_diagnostics": True,  
     },

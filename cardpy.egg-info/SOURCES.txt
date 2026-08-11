@@ -7,6 +7,9 @@ cardpy/Data_Saving.py
 cardpy/Data_Sorting.py
 cardpy/FT_Operators.py
 cardpy/__init__.py
+cardpy/config.py
+cardpy/pipeline.py
+cardpy/test_config.py
 cardpy.egg-info/PKG-INFO
 cardpy.egg-info/SOURCES.txt
 cardpy.egg-info/dependency_links.txt

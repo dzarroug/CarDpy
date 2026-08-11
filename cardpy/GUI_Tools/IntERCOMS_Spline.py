@@ -264,7 +264,11 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
         def draw_epicardium_spline(self):
             if len(self.epicardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.epicardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                try:
+                    tck, _         = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                except (ValueError, TypeError):
+                    print('Could not fit spline. Click at least 4 spread-out, non-overlapping points.')
+                    return
                 u                  = np.linspace(0, 1, num = 1000)
                 x_spline, y_spline = splev(u, tck)
 
@@ -286,7 +290,11 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
         def draw_endocardium_spline(self):
             if len(self.endocardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.endocardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                try:
+                    tck, _         = splprep([x_points, y_points], s = 0)  # Spline parameters, s=0 for interpolation
+                except (ValueError, TypeError):
+                    print('Could not fit spline. Click at least 4 spread-out, non-overlapping points.')
+                    return
                 u                  = np.linspace(0, 1, num = 1000)
                 x_spline, y_spline = splev(u, tck)
 
@@ -309,7 +317,12 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
         def get_epicardium_spline_data(self):
             if len(self.epicardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.epicardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)
+                try:
+                    tck, _         = splprep([x_points, y_points], s = 0)
+                except (ValueError, TypeError):
+                    print('Could not fit spline. Click at least 4 spread-out, non-overlapping points.')
+                    self.epicardium_spline_data = [None]
+                    return self.epicardium_spline_data
                 u                  = np.linspace(0, 1, num = 200)
                 x_spline, y_spline = splev(u, tck)
                 spline_epicardium_coords = list(zip(x_spline, y_spline))
@@ -323,7 +336,12 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
         def get_endocardium_spline_data(self):
             if len(self.endocardium_mouse_clicks) >= 4:
                 x_points, y_points = zip(*self.endocardium_mouse_clicks)
-                tck, _             = splprep([x_points, y_points], s = 0)
+                try:
+                    tck, _         = splprep([x_points, y_points], s = 0)
+                except (ValueError, TypeError):
+                    print('Could not fit spline. Click at least 4 spread-out, non-overlapping points.')
+                    self.endocardium_spline_data = [None]
+                    return self.endocardium_spline_data
                 u                  = np.linspace(0, 1, num = 200)
                 x_spline, y_spline = splev(u, tck)
                 spline_endocardium_coords = list(zip(x_spline, y_spline))

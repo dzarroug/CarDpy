@@ -53,7 +53,7 @@ Action Tasks:
     -  Zooming, drag to resize
 5 - GUI updates for usability 
 3 - manual rejection tool to see all the images and click on one to reject
-1 - stop pop ups for plots
+Done - stop pop ups for plots
 2 - version of cardpy calls that is not jupyter notebook --> have a config file and use that to determine what steps to use
     - refine pip install set-up (pypi)
  
