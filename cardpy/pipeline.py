@@ -170,11 +170,11 @@ def process(study_root, config, save=True):
     reg_den  = config["registration"]["temporary_denoising"]
 
     counter = {"n": -1}
-    def _save_stage(name, mm, bb, vv, Header):
+    def _save_stage(name, mm, bb, vv, Header, folder_name=None):
         if not save:
             return
         counter["n"] += 1
-        folder      = str(counter["n"]).zfill(2) + '_' + name
+        folder      = str(counter["n"]).zfill(2) + '_' + (folder_name if folder_name is not None else name)
         output_path = os.path.join(out_path, folder)
         os.makedirs(output_path, exist_ok=True)
         Save_Diffusion_Image_Data(output_path, name, Header, mm, bb, vv)
@@ -204,6 +204,35 @@ def process(study_root, config, save=True):
             zoom=r["zoom"], IntERACT_zoom=r["interact_zoom"], organ=r["organ"],
             operation_type=op, diagnostics_path=out_path)
         _save_stage('Rejected', m, b, v, Header)
+        if save:
+            diag_dir = os.path.join(out_path, '13_Diagnostics')
+            os.makedirs(diag_dir, exist_ok=True)
+            with open(os.path.join(diag_dir, 'Crop_Coordinates.txt'), 'w') as f:
+                f.write('Heart crop coordinates (per slice)\n')
+                f.write('Format: x_start, x_end, y_start, y_end\n\n')
+                x_start, x_end, y_start, y_end = Slice_Coordinates
+                for s_i in range(len(x_start)):
+                    f.write('Slice %d: x_start=%s, x_end=%s, y_start=%s, y_end=%s\n'
+                            % (s_i + 1, x_start[s_i], x_end[s_i], y_start[s_i], y_end[s_i]))
+            with open(os.path.join(diag_dir, 'Rejection_Statistics.txt'), 'w') as f:
+                f.write('Rejection statistics\n')
+                f.write('Acceptance rate = %% of averages kept for each slice/direction.\n')
+                f.write('Rejected average indices are 0-based within each slice/direction.\n\n')
+                n_slc, n_dif, n_avg = keep.shape
+                total_rejected = 0
+                for s_i in range(n_slc):
+                    for dif in range(n_dif):
+                        rejected_idx = np.where(keep[s_i, dif, :] == 0)[0]
+                        n_rej = int(len(rejected_idx))
+                        total_rejected += n_rej
+                        rate = stats[s_i, dif]
+                        idx_str = ', '.join(str(int(i)) for i in rejected_idx) if n_rej > 0 else 'none'
+                        f.write('Slice %d, Direction %d: %.1f%% accepted | %d rejected (indices: %s)\n'
+                                % (s_i + 1, dif + 1, rate, n_rej, idx_str))
+                f.write('\n--- Summary ---\n')
+                f.write('Total averages rejected: %d\n' % total_rejected)
+                f.write('Total averages examined: %d\n' % keep.size)
+                f.write('Overall mean acceptance rate: %.1f%%\n' % stats.mean())
 
     # ----- Respiratory -----
     if config["respiratory"]["enabled"]:
@@ -215,7 +244,7 @@ def process(study_root, config, save=True):
         m, b, v, _ = respiratory_sorting(m2, b2, v2, zoom=rs["zoom"],
                                          IntERACT_zoom=rs["interact_zoom"], organ=rs["organ"],
                                          operation_type=op)
-        _save_stage('Respiratory_Ordered', m, b, v, Header)
+        _save_stage('Respiratory_Ordered', m, b, v, Header, folder_name='Respiratory_Sorted')
 
     # ----- Registration (standalone) -----
     if config["registration"]["enabled"]:
@@ -228,7 +257,7 @@ def process(study_root, config, save=True):
     if config["adc_filter"]["enabled"]:
         print('ADC Filter mode is on.')
         m, b, v = ADC_Filter(m, b, v, operation_type=op)
-        _save_stage('ADC_Filtered', m, b, v, Header)
+        _save_stage('ADC_Filtered', m, b, v, Header, folder_name='Diffusivity_Filtered')
 
     # ----- Averaging (register after) -----
     if config["averaging"]["enabled"]:
