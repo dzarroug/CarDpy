@@ -209,7 +209,6 @@ def process(study_root, config, save=True):
             os.makedirs(diag_dir, exist_ok=True)
             with open(os.path.join(diag_dir, 'Crop_Coordinates.txt'), 'w') as f:
                 f.write('Heart crop coordinates (per slice)\n')
-                f.write('Format: x_start, x_end, y_start, y_end\n\n')
                 x_start, x_end, y_start, y_end = Slice_Coordinates
                 for s_i in range(len(x_start)):
                     f.write('Slice %d: x_start=%s, x_end=%s, y_start=%s, y_end=%s\n'

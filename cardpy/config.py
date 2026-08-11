@@ -7,6 +7,7 @@ DEFAULT_CONFIG = {
     "data_type":        "DICOM",       # "DICOM" or "NifTis"
     "dicom_reader_info": "ON",
     "operation_type":   "Magnitude",   # "Magnitude" or "Complex"
+    "dicom_subpath":    "02_cDTI/SAX/cDTI_SF_b350_RL_71",   # path to DICOM series inside study folder
     "slice_index":      [3],           # list of slice indices, or None for all
 
     ### ---- Gibbs ringing removal ----
@@ -75,7 +76,7 @@ DEFAULT_CONFIG = {
     ### ---- cDTI analysis (post-contour) ----
     "cdti": {
         "num_interp_points": 200,
-        "smoothness_level":  "Medium",
+        "smoothness_level":  "Low",
         "helix_angle_filter": {
             "linear_outlier_stdev":    1,
             "spatial_wall_depth_factor": 0.25,

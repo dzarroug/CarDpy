@@ -9,8 +9,8 @@ A Python toolbox for processing cardiac diffusion tensor imaging (cDTI) data.
 Create the Conda environment:
 
 ```bash
-conda create -n cardpy-test python=3.12 -y, then
-conda activate cardpy-test
+conda create -n cardpy python=3.14 -y
+conda activate cardpy
 ```
 
 ### Installation
@@ -20,11 +20,39 @@ Install **CarDpy** with:
 ```bash
 pip install "cardpy[macos] @ git+https://github.com/dzarroug/CarDpy.git@dev"
 ```
-Delete [macos] if not using Mac. 
+Delete `[macos]` if not using Mac.
 
-### Run the pipeline! 
-Start with 01_Data_Processing then run 02_Post-Processing Using Healthy_Volunteer_07 Dataset 
+### Run the pipeline
 
+There are two ways to run CarDpy:
+
+**1. One call with `process()`.** Run the full pipeline from a script:
+
+```python
+from cardpy.pipeline import process
+from cardpy.config import DEFAULT_CONFIG
+import copy
+
+config = copy.deepcopy(DEFAULT_CONFIG)
+config["dicom_subpath"] = "02_cDTI/SAX/your_series_folder_name"
+
+results = process("/full/path/to/your/study_folder", config)
+```
+
+The contouring GUI opens during the run. Draw the contours, and the pipeline
+finishes on its own. `results` is a dictionary of the DTI metrics, eigenvectors,
+cardiac metrics, and mask. Outputs are also written to a `CarDpy_Output/` folder
+inside your study folder.
+
+Because each config is an independent dictionary, you can define several and run
+them in one script (e.g. one per protocol or per patient). This is useful for comparing processing settings on the same data. 
+(Contouring still runs per slice for each.)
+
+For the full list of configuration options, the return-value format, and data
+setup details, see **[HOW_TO_USE.md](HOW_TO_USE.md)**.
+
+**2. Notebooks or Script (step-by-step).** Write a new script/notebook or use sample notebook. With Sample notebooks start with `01_Data_Processing`, then run
+`02_Post-Processing`, using the your data or the sample `Healthy_Volunteer_007` dataset.
 
 ## Associated Publication
 
@@ -39,7 +67,8 @@ DOI: https://doi.org/10.1007/978-3-031-94562-5_13
 ## Completed Tasks
 
 - preliminary pip install
-- GUI compatibility on Python 3.12 and 3.14
+- GUI compatibility on Python 3.12
+- config-driven `process()` pipeline
 
 ---
 
@@ -49,15 +78,11 @@ When possible:
 - windows testing
 
 Action Tasks:
-4 - call the GUI an additional time to do a "whole-heart crop" which maybe useful for segmenntation
+4 - call the GUI an additional time to do a "whole-heart crop" which maybe useful for segmentation
     -  Zooming, drag to resize
-5 - GUI updates for usability 
+5 - GUI updates for usability
 3 - manual rejection tool to see all the images and click on one to reject
-Done - stop pop ups for plots
-2 - version of cardpy calls that is not jupyter notebook --> have a config file and use that to determine what steps to use
-    - refine pip install set-up (pypi)
- 
-
+2 - refine pip install set-up (pypi)
 
 ## Proposed Merges with Tyler
 - New registration WIP
