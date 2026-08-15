@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cardpy"
+name = "cardpy-cmr"
 version = "0.1.0"
 description = "CarDpy: Cardiac Diffusion in Python — a cardiac DTI post-processing toolbox."
 readme = "README.md"

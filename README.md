@@ -67,7 +67,7 @@ DOI: https://doi.org/10.1007/978-3-031-94562-5_13
 ## Completed Tasks
 
 - preliminary pip install
-- GUI compatibility on Python 3.12
+- GUI compatibility on Python 3.12 + 3.14
 - config-driven `process()` pipeline
 
 ---
