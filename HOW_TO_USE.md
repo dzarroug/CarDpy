@@ -11,7 +11,7 @@ see the [README](README.md).
 ```bash
 conda create -n cardpy python=3.14 -y
 conda activate cardpy
-pip install "cardpy[macos] @ git+https://github.com/dzarroug/CarDpy.git@dev"
+pip install "cardpy-cmr[macos]"
 ```
 
 Drop `[macos]` on Linux or Windows (it installs `tkmacosx`, needed only on Mac).

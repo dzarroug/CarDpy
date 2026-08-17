@@ -2,6 +2,8 @@
 
 A Python toolbox for processing cardiac diffusion tensor imaging (cDTI) data.
 
+For a complete guide see, see **[HOW_TO_USE.md](HOW_TO_USE.md)**
+
 # Getting Started
 
 ### Environment Setup
@@ -18,7 +20,7 @@ conda activate cardpy
 Install **CarDpy** with:
 
 ```bash
-pip install "cardpy[macos] @ git+https://github.com/dzarroug/CarDpy.git@dev"
+pip install "cardpy-cmr[macos]"
 ```
 Delete `[macos]` if not using Mac.
 
