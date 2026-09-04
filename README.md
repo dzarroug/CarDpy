@@ -2,7 +2,7 @@
 
 A Python toolbox for processing cardiac diffusion tensor imaging (cDTI) data.
 
-For a complete guide, see **[HOW_TO_USE.md](HOW_TO_USE.md)**.
+For a complete guide, see **[HOW_TO_USE.md](https://github.com/dzarroug/CarDpy/blob/dev/HOW_TO_USE.md)**.
 
 # Getting Started
 

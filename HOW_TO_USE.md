@@ -2,7 +2,7 @@
 
 A full guide to running CarDpy: pointing it at your data, editing the
 configuration, running `process()`, and using the results. For a quick start,
-see the [README](README.md).
+see the **[README.md](https://github.com/dzarroug/CarDpy/blob/dev/README.md)**.
 
 ---
 
