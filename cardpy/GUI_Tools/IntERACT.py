@@ -1,5 +1,4 @@
-import matplotlib
-matplotlib.use('TkAgg')
+from cardpy.GUI_Tools._runtime import create_window, wait_window
 import matplotlib.pyplot as plt
 from   sys                               import platform
 import tkinter                           as tk
@@ -8,7 +7,12 @@ import numpy                             as np
 from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from   screeninfo                        import get_monitors
 
-def INTERACT_GUI(original_matrix, organ_of_intrest):
+def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='legacy'):
+    if gui_version == 'v2':
+        from cardpy.GUI_Tools.IntERACT_v2 import INTERACT_GUI as box_crop
+        return box_crop(original_matrix, organ_of_intrest)
+    if gui_version != 'legacy':
+        raise ValueError("gui_version must be 'legacy' or 'v2'.")
     from   sys                               import platform
     import tkinter                           as tk
     import matplotlib.pyplot                 as plt
@@ -54,7 +58,7 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
         y_start.append([])
         y_end.append([])
     # root window
-    root = tk.Tk()
+    root = create_window('CarDpy')
 
     if platform == 'darwin':
         from tkmacosx import Button
@@ -159,14 +163,14 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
                                         relx      = 0.1,
                                         rely      = 0.1)
 
-    hVar1 = tk.DoubleVar()  # left handle variable
-    hVar2 = tk.DoubleVar()  # right handle variable
-    hVar3 = tk.DoubleVar()  # left handle variable
-    hVar4 = tk.DoubleVar()  # right handle variable
-    hVar5 = tk.DoubleVar()  # left handle variable
-    hVar6 = tk.DoubleVar()  # right handle variable
-    hVar5.set(0)   # ADD THIS — matches initial min_clim
-    hVar6.set(1)   # ADD THIS — matches initial max_clim
+    hVar1 = tk.DoubleVar(master=root)  # left handle variable
+    hVar2 = tk.DoubleVar(master=root)  # right handle variable
+    hVar3 = tk.DoubleVar(master=root)  # left handle variable
+    hVar4 = tk.DoubleVar(master=root)  # right handle variable
+    hVar5 = tk.DoubleVar(master=root)  # left handle variable
+    hVar6 = tk.DoubleVar(master=root)  # right handle variable
+    hVar5.set(0)
+    hVar6.set(1)
     # ------------------------------------------------------------------
     # Range controls.
     # ------------------------------------------------------------------
@@ -262,7 +266,7 @@ def INTERACT_GUI(original_matrix, organ_of_intrest):
                           relx      = 0.9,
                           rely      = 0.9)
         Next_Button["state"] = "disabled"
-    root.mainloop()
+    wait_window(root)
     return [x_start, x_end, y_start, y_end]
 
 def execute_crop():

@@ -1,4 +1,4 @@
-def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm = 'LocalPCA', numCoils = 20, operation_type = 'Magnitude'):
+def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm = 'LocalPCA', numCoils = 20, operation_type = 'Magnitude', b0_threshold = 0):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -45,7 +45,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
     ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2022
     ########## Import modules #####################################################################################################################
     import numpy                           as     np                                                                                # Import numpy module
-    from   cardpy.Data_Sorting             import sorted2stacked, stacked2sorted                                                    # Import sorted to stacked and stacked to sorted from CarDpy
+    from   cardpy.Data_Sorting             import sorted2stacked, stacked2layout                                                    # Import sorted to stacked and stacked to sorted from CarDpy
     from   dipy.denoise.patch2self         import patch2self                                                                        # Import patch to self-denoising from DiPy
     from   dipy.denoise.noise_estimate     import estimate_sigma                                                                    # Import non-local means denoising sigma estimate from DiPy
     from   dipy.denoise.nlmeans            import nlmeans                                                                           # Import non-local means denoising from DiPy
@@ -54,7 +54,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
     from   dipy.denoise.localpca           import localpca                                                                          # Import local PCA denoising from DiPy
     ########## Address data type of stacked matrix ################################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)                # Convert sorted data into stacked data
-    if stacked_matrix.dtype == 'complex128':                                                                                        # If data type is complex ...
+    if operation_type == 'Complex' or np.iscomplexobj(stacked_matrix):                                                                                        # If data type is complex ...
         if operation_type == 'Complex':                                                                                                 # If operation type is complex ...
             real_matrix     = np.real(stacked_matrix)                                                                                       # Separate real part from complex data
             imag_matrix     = np.imag(stacked_matrix)                                                                                       # Separate imaginary part from complex data
@@ -73,13 +73,13 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
         print('Denoising images using Patch2Self.')                                                                                     # Print which algorithm is selected
         if operation_type == 'Complex':                                                                                                 # If data type is complex ...
             ########## Real matrix operations ##########
-            denoised_real_matrix = patch2self(real_matrix, stacked_bvals)                                                                   # Store denoised real matrix
+            denoised_real_matrix = patch2self(real_matrix, stacked_bvals, b0_threshold=b0_threshold)                                                                   # Store denoised real matrix
             ########## Imaginary matrix operations ##########
-            denoised_imag_matrix = patch2self(imag_matrix, stacked_bvals)                                                                   # Store denoised imaginary matrix
+            denoised_imag_matrix = patch2self(imag_matrix, stacked_bvals, b0_threshold=b0_threshold)                                                                   # Store denoised imaginary matrix
             ########## Combine real and imaginary data ##########
             denoised_matrix      = denoised_real_matrix + (1j * denoised_imag_matrix)                                                       # Store denoised complex matrix
         if operation_type == 'Magnitude':                                                                                               # If data type is magnitude ...
-            denoised_matrix      = patch2self(stacked_matrix, stacked_bvals)                                                                # Store denoised matrix
+            denoised_matrix      = patch2self(stacked_matrix, stacked_bvals, b0_threshold=b0_threshold)                                                                # Store denoised matrix
     ########## Non-local means denoising ##########################################################################################################
     if denoising_algorithm == 'NLMeans':                                                                                            # If Non-Local Means is selected ...
         print('Denoising images using Non-Local Means (NLMEANS).')                                                                      # Print which algorithm is selected
@@ -98,7 +98,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
     ########## Local PCA denoising ################################################################################################################
     if denoising_algorithm == 'LocalPCA':                                                                                           # If Local PCA is selected ...
         print('Denoising images using Local PCA via empirical thresholds.')                                                             # Print which algorithm is selected
-        gtab   = gradient_table(stacked_bvals, bvecs=stacked_bvecs)                                                                           # Create gradient table from b-values and b-vectors
+        gtab   = gradient_table(stacked_bvals, bvecs=stacked_bvecs, b0_threshold=b0_threshold)                                                                           # Create gradient table from b-values and b-vectors
         slices = stacked_matrix.shape[2]                                                                                                # Extract number of slices
         if operation_type == 'Complex':                                                                                                 # If data type is complex ...
             for slc in range(slices):                                                                                                       # Iterate through slices
@@ -107,13 +107,13 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
                 tmp_real_matrix   = tmp_real_matrix[:, :, np.newaxis, :]                                                                        # Insert new axis as real matrix has compressed
                 tmp_real_matrix   = np.repeat(tmp_real_matrix, 5, axis = 2)                                                                     # Pad array with repeats of the selected slice
                 sigma_real        = pca_noise_estimate(tmp_real_matrix, gtab, correct_bias = True, smooth = 2)                                  # Set sigma for local PCA denoising using real matrix
-                tmp_real_denoised = localpca(tmp_real_matrix, sigma, tau_factor = 2.3, patch_radius = 2)                                        # Run Local PCA for real matrix
+                tmp_real_denoised = localpca(tmp_real_matrix, sigma=sigma_real, tau_factor = 2.3, patch_radius = 2)                                        # Run Local PCA for real matrix
                 ########## Imaginary matrix operations ##########
                 tmp_imag_matrix   = imag_matrix[:, :, slc, :]                                                                                   # Select slice you want to denoise
                 tmp_imag_matrix   = tmp_imag_matrix[:, :, np.newaxis, :]                                                                        # Insert new axis as imaginary matrix has compressed
                 tmp_imag_matrix   = np.repeat(tmp_imag_matrix, 5, axis = 2)                                                                     # Pad array with repeats of the selected slice
                 sigma_imag        = pca_noise_estimate(tmp_imag_matrix, gtab, correct_bias = True, smooth = 2)                                  # Set sigma for local PCA denoising using imaginary matrix
-                tmp_imag_denoised = localpca(tmp_imag_matrix, sigma, tau_factor = 2.3, patch_radius = 2)                                        # Run Local PCA for imaginary matrix
+                tmp_imag_denoised = localpca(tmp_imag_matrix, sigma=sigma_imag, tau_factor = 2.3, patch_radius = 2)                                        # Run Local PCA for imaginary matrix
                 ########## Combine real and imaginary data ##########
                 denoised_matrix[:, :, slc, :] = tmp_real_denoised[:, :, 2, :] + (1j * tmp_imag_denoised[:, :, 2, :] )                           # Store selected denoised complex slice
         if operation_type == 'Magnitude':                                                                                               # If data type is magnitude ...
@@ -125,7 +125,7 @@ def denoise(original_matrix, original_bvals, original_bvecs, denoising_algorithm
                 tmp_denoised = localpca(tmp_matrix, sigma=sigma_mag, tau_factor = 2.3, patch_radius = 2)                                              # Run Local PCA for magnitude data
                 denoised_matrix[:, :, slc, :] = tmp_denoised[:, :, 2, :]                                                                        # Store selected denoised magnitude slice
     ########## Tie-up-loose-ends ... ##############################################################################################################
-    [denoised_matrix, _, _] = stacked2sorted(denoised_matrix, stacked_bvals, stacked_bvecs)                                         # Convert stacked data into sorted data
+    denoised_matrix = stacked2layout(denoised_matrix, original_matrix.shape)
     denoised_bvals          = original_bvals                                                                                        # Store b-value information
     denoised_bvecs          = original_bvecs                                                                                        # Store b-vector information
     return [denoised_matrix, denoised_bvals, denoised_bvecs]

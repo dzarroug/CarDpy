@@ -1,4 +1,4 @@
-def DTI_segmentation_matrix(original_matrix, original_bvals, original_bvecs):
+def DTI_segmentation_matrix(original_matrix, original_bvals, original_bvecs, tensor_fit='NLLS', b0_threshold=0):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -26,7 +26,7 @@ def DTI_segmentation_matrix(original_matrix, original_bvals, original_bvecs):
     import numpy                         as np
     import cv2
     ########## Initialize interpolated matrix ######################################################################################################
-    [_, _, Eigenvectors, Standard_DTI_Metrics] = DTI_recon(original_matrix, original_bvals, original_bvecs)
+    [_, _, Eigenvectors, Standard_DTI_Metrics] = DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit=tensor_fit, b0_threshold=b0_threshold)
     ########## Convert sorted data into stacked data ##############################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)            # Convert sorted data into stacked data
     

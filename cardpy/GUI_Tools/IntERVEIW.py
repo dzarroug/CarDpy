@@ -1,3 +1,5 @@
+from cardpy.GUI_Tools._runtime import create_window, wait_window
+
 def IntERVEIW_GUI(original_matrix):
     from   sys                               import platform
     import tkinter                           as tk
@@ -60,8 +62,8 @@ def IntERVEIW_GUI(original_matrix):
         Anterior_RVIP.append([])
         Inferior_RVIP.append([])
     # root window
-    root = tk.Tk()
-    var = tk.IntVar()
+    root = create_window('CarDpy')
+    var = tk.IntVar(master=root)
     if platform == 'darwin':
         from tkmacosx import Button
     else:
@@ -432,7 +434,7 @@ def IntERVEIW_GUI(original_matrix):
                           relx      = 0.875,
                           rely      = 0.925)
         Next_Button["state"] = "disabled"
-    root.mainloop()
+    wait_window(root)
     return [Slice_Location, Anterior_RVIP, Inferior_RVIP]
 def select_Location():
     import numpy as np

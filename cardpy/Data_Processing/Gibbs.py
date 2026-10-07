@@ -25,12 +25,12 @@ def unrung(original_matrix, original_bvals, original_bvecs, operation_type = 'Ma
     ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
     ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2022
     ########## Import modules #####################################################################################################################
-    from   cardpy.Data_Sorting import sorted2stacked, stacked2sorted                                          # Import sorted to stacked and stacked to sorted from CarDpy
+    from   cardpy.Data_Sorting import sorted2stacked, stacked2layout                                          # Import sorted to stacked and stacked to sorted from CarDpy
     import numpy               as     np                                                                      # Import numpy module
     from   dipy.denoise.gibbs  import gibbs_removal                                                           # Import Gibb's removal from DiPy
     ########## Address data type of stacked matrix ################################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)    # Convert sorted data into stacked data
-    if stacked_matrix.dtype == 'complex128':                                                                            # If data type is complex ...
+    if np.iscomplexobj(stacked_matrix):                                                                            # If data type is complex ...
         if operation_type == 'Complex':                                                                                     # If operation type is complex ...
             magnitude_matrix = np.abs(stacked_matrix)                                                                           # Separate magnitude part from complex data
             phase_matrix     = np.angle(stacked_matrix)                                                                         # Separate phase part from complex data
@@ -51,7 +51,7 @@ def unrung(original_matrix, original_bvals, original_bvecs, operation_type = 'Ma
     if operation_type == 'Magnitude':                                                                                   # If operation type is magnitude ...
         unrung_matrix = gibbs_removal(stacked_matrix, inplace = False)                                                      # Compute unrung magnitude data
     ########## Tie-up-loose-ends ... ##############################################################################################################
-    [unrung_matrix, _, _] = stacked2sorted(unrung_matrix, stacked_bvals, stacked_bvecs)                                 # Convert stacked data into sorted data
+    unrung_matrix = stacked2layout(unrung_matrix, original_matrix.shape)
     unrung_bvals          = original_bvals                                                                              # Store unrung b-values
     unrung_bvecs          = original_bvecs                                                                              # Store unrung b-vectors
     return [unrung_matrix, unrung_bvals, unrung_bvecs]

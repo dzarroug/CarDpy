@@ -1,4 +1,38 @@
-def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None):
+def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
+    """Map stacked rejection decisions back to variable-length encodings."""
+    import numpy as np
+
+    accepted_encodings = {}
+    stats_by_encoding = {}
+    keep_by_encoding = {}
+    offset = 0
+    for key, encoding, repetitions in dictionary_items:
+        encoding_keep = keep_matrix_stacked[:, offset:offset + repetitions].copy()
+        accepted_images = np.asarray(encoding['images']).copy()
+        stats_by_encoding[key] = np.mean(encoding_keep, axis=1) * 100
+        keep_by_encoding[key] = encoding_keep
+        for slc in range(encoding_keep.shape[0]):
+            good = np.flatnonzero(encoding_keep[slc] == 1)
+            bad = np.flatnonzero(encoding_keep[slc] == 0)
+            if bad.size == 0:
+                continue
+            if good.size == 0:
+                good = np.asarray([0])
+            for rejected in bad:
+                replacement = int(np.random.choice(good, 1)[0])
+                accepted_images[:, :, slc, rejected] = accepted_images[:, :, slc, replacement]
+        accepted_encodings[key] = {
+            'bval': float(encoding['bval']),
+            'bvec': np.asarray(encoding['bvec']).copy(),
+            'images': accepted_images,
+        }
+        offset += repetitions
+    if offset != keep_matrix_stacked.shape[1]:
+        raise ValueError('Dictionary repetitions do not match the stacked rejection decisions.')
+    return accepted_encodings, stats_by_encoding, keep_by_encoding
+
+
+def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
@@ -19,8 +53,8 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
     ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2022
     ########## Import Modules #####################################################################################################################
-    from   cardpy.Data_Sorting       import sorted2stacked, stacked2sorted                                                          # Import sorted to stacked and stacked to sorted from CarDpy
-    from   cardpy.GUI_Tools.IntERACT import INTERACT_GUI, execute_crop, next_slice, finish_program, update_plots                    #
+    from   cardpy.Data_Sorting       import sorted2stacked                                                          # Import sorted to stacked from CarDpy
+    from   cardpy.GUI_Tools.IntERACT import INTERACT_GUI                    #
     import numpy                     as     np                                                                                      #
     import cv2                                                                                                                      #
     from   skimage.metrics           import structural_similarity as ssim                                                           # Import strutural similarity metric from skimage module
@@ -38,7 +72,12 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     if diagnostics_path is None:
         diagnostics_path = os.getcwd()
     _diag_dir = os.path.join(diagnostics_path, '13_Diagnostics')
-    os.makedirs(_diag_dir, exist_ok = True)
+
+    def diagnostic_file(name):
+        if not save_diagnostics:
+            return None
+        os.makedirs(_diag_dir, exist_ok=True)
+        return os.path.join(_diag_dir, name)
     
     def _elbow_k(X, k_max, plot_title = None, save_path = None):
         # Replaces yellowbrick's KElbowVisualizer (default: distortion metric +
@@ -78,27 +117,55 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         return elbow                                                                                       #
 
     ########## Initialize accepted matrix and address data type of stacked matrix #################################################################
-    [original_matrix_stacked, original_bvals_stacked, original_bvecs_stacked] = sorted2stacked(original_matrix,
-                                                                                               original_bvals,
-                                                                                               original_bvecs)
-    accepted_matrix                                = np.zeros(original_matrix.shape)                                                # Initialize accepted matrix
-    if original_matrix_stacked.dtype == 'complex128':                                                                                        # If data type is complex ...
+    dictionary_input = isinstance(original_matrix, dict)
+    dictionary_items = []
+    if dictionary_input:
+        stacked_images = []
+        stacked_bvals = []
+        stacked_bvecs = []
+        for key, encoding in original_matrix.items():
+            images = np.asarray(encoding['images'])
+            if images.ndim != 4:
+                raise ValueError('Dictionary encoding images must have shape [rows, columns, slices, repetitions].')
+            repetitions = images.shape[3]
+            dictionary_items.append((key, encoding, repetitions))
+            stacked_images.append(images)
+            stacked_bvals.extend([float(encoding['bval'])] * repetitions)
+            stacked_bvecs.extend([np.asarray(encoding['bvec'], dtype=float)] * repetitions)
+        if not stacked_images:
+            raise ValueError('The encoding dictionary is empty.')
+        original_matrix_stacked = np.concatenate(stacked_images, axis=3)
+        original_bvals_stacked = np.asarray(stacked_bvals, dtype=float)
+        original_bvecs_stacked = np.asarray(stacked_bvecs, dtype=float)
+        accepted_matrix = None
+    else:
+        [original_matrix_stacked, original_bvals_stacked, original_bvecs_stacked] = sorted2stacked(original_matrix,
+                                                                                                   original_bvals,
+                                                                                                   original_bvecs)
+        accepted_matrix = np.zeros_like(original_matrix)                                                # Initialize accepted matrix
+    if len(np.unique(original_bvals_stacked)) != 2:
+        raise ValueError('Shot rejection currently requires exactly two b-value shells; process each shell pair separately or disable rejection.')
+    if np.iscomplexobj(original_matrix_stacked):                                                                                        # If data type is complex ...
         if operation_type == 'Complex':                                                                                                 # If operation type is complex ...
-            accepted_matrix = accepted_matrix.astype(np.complex128)                                                                         # Cast accepted matrix for complex data
+            if accepted_matrix is not None:
+                accepted_matrix = accepted_matrix.astype(np.complex128)                                                                         # Cast accepted matrix for complex data
         if operation_type == 'Magnitude':                                                                                               # If operation type is magnitude ...
-            accepted_matrix = accepted_matrix.astype(np.float64)                                                                            # Cast accepted matrix for magnitude data
-            original_matrix = abs(original_matrix_stacked)                                                                                           # Convert complex original matrix to magnitude data
+            if accepted_matrix is not None:
+                accepted_matrix = accepted_matrix.astype(np.float64)                                                                            # Cast accepted matrix for magnitude data
+            if not dictionary_input:
+                original_matrix = np.abs(original_matrix)                                                                                           # Convert complex original matrix to magnitude data
             print('Input data type is complex, but magnitude is being executed.')                                                           # Print warning
         temporary_matrix = abs(original_matrix_stacked)                                                                                          # Create temporary matrix variable using magnitude data
     else:                                                                                                                          # Otherwise ...
-        accepted_matrix  = accepted_matrix.astype(np.float64)                                                                           # Cast accepted matrix for magnitude data
+        if accepted_matrix is not None:
+            accepted_matrix  = accepted_matrix.astype(np.float64)                                                                           # Cast accepted matrix for magnitude data
         temporary_matrix = original_matrix_stacked                                                                                              # Create temporary matrix variable
     ########## ROI Cropping for Image #############################################################################################################
     slices                 = original_matrix_stacked.shape[2]                                                                      #
     Slice_Crop_Coordinates = []                                                                                             #
     if zoom == 'ON':                                                                                                               #
         if IntERACT_zoom == 'ON':
-            [x_start, x_end, y_start, y_end] = INTERACT_GUI(original_matrix_stacked, organ)
+            [x_start, x_end, y_start, y_end] = INTERACT_GUI(original_matrix_stacked, organ, gui_version=gui_version)
             Slice_Crop_Coordinates = [x_start, x_end, y_start, y_end]
             print('Slice Crop Coordinates: %s' % Slice_Crop_Coordinates)
         if IntERACT_zoom == 'OFF':
@@ -161,10 +228,10 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(slices):                                                                                                                                       # Iterate through slices
         for avg_i in range(len(bval_low_indicies)):                                                                                                                                   # Iterate through averages (ith average)
             for avg_j in range(len(bval_low_indicies)):                                                                                                                                   # Iterate through averages (jth average)
-                SSIM_bvl_v_bvl[avg_i, avg_j, slc] = ssim(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
-                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
-                RMSE_bvl_v_bvl[avg_i, avg_j, slc] = np.sqrt(mse(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
-                                                                original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
+                SSIM_bvl_v_bvl[avg_i, avg_j, slc] = ssim(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
+                                                         temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
+                RMSE_bvl_v_bvl[avg_i, avg_j, slc] = np.sqrt(mse(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_i]],
+                                                                temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_low_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
         NSSIM_bvl_v_bvl[:, :, slc] = SSIM_bvl_v_bvl[:, :, slc] / SSIM_bvl_v_bvl[:, :, slc].max()                                          # Normalize SSIM across all averages
         NRMSE_bvl_v_bvl[:, :, slc] = RMSE_bvl_v_bvl[:, :, slc] / RMSE_bvl_v_bvl[:, :, slc].max()                                          # Normalize RMSE across all averages
         ###### ######
@@ -205,7 +272,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         tile_size = int(np.floor(30 / data.shape[0]))
         data_estimate = np.tile(data, (tile_size, 1))
         if data.shape[0] > 1:
-            _elbow_value = _elbow_k(data_estimate, data_estimate.shape[0] + 1, plot_title = 'K-Means Estimate (Low $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_LowB_Slice_%02d.png' % int(slc + 1)))
+            _elbow_value = _elbow_k(data_estimate, data_estimate.shape[0] + 1, plot_title = 'K-Means Estimate (Low $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = diagnostic_file('KMeans_Estimate_LowB_Slice_%02d.png' % int(slc + 1)))
             k_means_cluster.append(_elbow_value)
             NSSIM_AoA_post_list_temp = [i for i in NSSIM_AoA_post_list if i != 0]
             NRMSE_AoA_post_list_temp = [i for i in NRMSE_AoA_post_list if i != 0]
@@ -279,7 +346,8 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.ylabel('NRMSE')
         plt.xlim([-0.1, 1.1])
         plt.ylim([-0.1, 1.1])
-        fig.savefig(os.path.join(_diag_dir, 'KMeans_Clusters_LowB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
+        if save_diagnostics:
+            fig.savefig(diagnostic_file('KMeans_Clusters_LowB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
         plt.close(fig)
     ########## High b-value rejection ##############################################################################################################
     SSIM_bvh_v_bvh  = np.zeros([len(bval_high_indicies), len(bval_high_indicies), slices])                                                                                # Initialize structure similarity index measure (SSIM) for low b-value comparison matrix
@@ -290,10 +358,10 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(slices):                                                                                                                                       # Iterate through slices
         for avg_i in range(len(bval_high_indicies)):                                                                                                                                   # Iterate through averages (ith average)
             for avg_j in range(len(bval_high_indicies)):                                                                                                                                   # Iterate through averages (jth average)
-                SSIM_bvh_v_bvh[avg_i, avg_j, slc] = ssim(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
-                                                         original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
-                RMSE_bvh_v_bvh[avg_i, avg_j, slc] = np.sqrt(mse(original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
-                                                                original_matrix_stacked[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
+                SSIM_bvh_v_bvh[avg_i, avg_j, slc] = ssim(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
+                                                         temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]], data_range=2.0)                           # Compute SSIM between ith and jth low b-value averages
+                RMSE_bvh_v_bvh[avg_i, avg_j, slc] = np.sqrt(mse(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_i]],
+                                                                temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, bval_high_indicies[avg_j]]))                   # Compute RMSE between ith and jth low b-value averages
         NSSIM_bvh_v_bvh[:, :, slc] = SSIM_bvh_v_bvh[:, :, slc] / SSIM_bvh_v_bvh[:, :, slc].max()                                          # Normalize SSIM across all averages
         NRMSE_bvh_v_bvh[:, :, slc] = RMSE_bvh_v_bvh[:, :, slc] / RMSE_bvh_v_bvh[:, :, slc].max()                                          # Normalize RMSE across all averages
     ###### ######
@@ -335,7 +403,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         NSSIM_AoA_post_list = NSSIM_AoA_post[:, slc].tolist()                                                                                                 # Convert NSSIM AoA for post automatic acquisition rejection to a list
         NRMSE_AoA_post_list = NRMSE_AoA_post[:, slc].tolist()                                                                                                 # Convert NRMSE AoA for post automatic acquisition rejection to a list
         data = np.hstack((NSSIM_AoA_post[:, slc, np.newaxis], NRMSE_AoA_post[:, slc, np.newaxis]))                                                  # Combine NSSIM AoA post and NRMSE AoA post into an [avg,2] shape
-        _elbow_value = _elbow_k(data, len(NSSIM_AoA_post_list) + 1, plot_title = 'K-Means Estimate (High $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = os.path.join(_diag_dir, 'KMeans_Estimate_HighB_Slice_%02d.png' % int(slc + 1)))
+        _elbow_value = _elbow_k(data, len(NSSIM_AoA_post_list) + 1, plot_title = 'K-Means Estimate (High $\\it{b-value}$) for Slice %i' % int(slc + 1), save_path = diagnostic_file('KMeans_Estimate_HighB_Slice_%02d.png' % int(slc + 1)))
         # handles no elbow case now as well for security (can change if unwanted)
         if _elbow_value is None or _elbow_value < 6:
             k_means_cluster.append(6)
@@ -406,7 +474,8 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         plt.ylabel('NRMSE')
         plt.xlim([-0.1, 1.1])
         plt.ylim([-0.1, 1.1])
-        fig.savefig(os.path.join(_diag_dir, 'KMeans_Clusters_HighB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
+        if save_diagnostics:
+            fig.savefig(diagnostic_file('KMeans_Clusters_HighB_Slice_%02d.png' % int(slc + 1)), dpi = 150, bbox_inches = 'tight')
         plt.close(fig)
     keep_matrix_stacked = np.zeros([original_matrix_stacked.shape[2], original_matrix_stacked.shape[3]])
     for slc in range(keep_bvl_matrix.shape[1]):
@@ -415,6 +484,25 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(keep_bvh_matrix.shape[1]):
         for acquisition in range(keep_bvh_matrix.shape[0]):
             keep_matrix_stacked[slc, bval_high_indicies[acquisition]] = keep_bvh_matrix[acquisition, slc]
+    if dictionary_input:
+        accepted_encodings, stats_by_encoding, keep_by_encoding = _apply_dictionary_keep(
+            dictionary_items, keep_matrix_stacked)
+        if operation_type == 'Magnitude':
+            for encoding in accepted_encodings.values():
+                if np.iscomplexobj(encoding['images']):
+                    encoding['images'] = np.abs(encoding['images'])
+        for key, encoding, _ in dictionary_items:
+            for slc, rate in enumerate(stats_by_encoding[key]):
+                print('Acceptance rate for slice %i, b=%g, vector=%s: %.1f%%'
+                      % (slc + 1, encoding['bval'], np.asarray(encoding['bvec']), rate))
+                if not np.any(keep_by_encoding[key][slc]):
+                    print('All repetitions were rejected for slice %i, b=%g, vector=%s; '
+                          'retaining repetition 0.'
+                          % (slc + 1, encoding['bval'], np.asarray(encoding['bvec'])))
+        accepted_bvals = np.asarray([encoding['bval'] for encoding in accepted_encodings.values()])
+        accepted_bvecs = np.asarray([encoding['bvec'] for encoding in accepted_encodings.values()])
+        return [accepted_encodings, accepted_bvals, accepted_bvecs,
+                Slice_Crop_Coordinates, stats_by_encoding, keep_by_encoding]
     ########## Identify new matrix dimensions ######################################################################################################
     numRow                  = original_matrix_stacked.shape[0]                                                                   # Define number of rows (x)
     numCol                  = original_matrix_stacked.shape[1]                                                                   # Define number of columns (y)
@@ -438,7 +526,7 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         for dif in range(stats.shape[1]):
             stats[slc, dif] = (np.sum(keep_matrix_sorted[slc, dif, :]) / keep_matrix_sorted.shape[2]) * 100
             print('Acceptance rate for slice %i, direction %i: %.1f%%' %(int(slc + 1), int(dif + 1), stats[slc, dif]))
-    accepted_matrix = np.zeros(original_matrix.shape)
+    accepted_matrix = np.zeros_like(original_matrix)
     accepted_bvals  = []
     accepted_bvecs  = []
     averages = keep_matrix_sorted.shape[2]
@@ -450,6 +538,9 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
                 all_averages   = np.arange(0, averages)                                                                                                                         # Define indices all averages
                 bad_averages   = np.where((keep_matrix_sorted[slc, dif, :] == 0))[0]                                                                                          # Identify indices of bad averages
                 good_averages  = np.delete(all_averages, bad_averages)                                                                                                          # Identify indices of good averages
+                if good_averages.size == 0:
+                    print('All repetitions were rejected for slice %i, direction %i; retaining the first repetition.' % (slc + 1, dif + 1))
+                    good_averages = np.asarray([0])
                 final_averages = all_averages
                 for idx in range(len(bad_averages)):                                                                                                                            # Iterate through indices of bad averages
                     replacement_average               = np.random.choice(good_averages, 1)[0]                                                                                          # Select random replacement index from indices of good averages

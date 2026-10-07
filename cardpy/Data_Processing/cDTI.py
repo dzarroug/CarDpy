@@ -1,4 +1,4 @@
-def cDTI_recon(myocardial_mask, Eigenvectors, num_interp_points = 200, smoothness_level = 'Low', Helix_Angle_Filter_Settings = 'Default'):
+def cDTI_recon(myocardial_mask, Eigenvectors, num_interp_points = 200, smoothness_level = 'Low', Helix_Angle_Filter_Settings = 'Default', hap_coordinate = 'cubic', in_plane_spacing_mm = None, compute_hap = True):
     """
     ########## Definition Inputs ##################################################################################################################
     # myocardial_mask               : Left or right ventricular binary mask.
@@ -13,6 +13,10 @@ def cDTI_recon(myocardial_mask, Eigenvectors, num_interp_points = 200, smoothnes
     #                                 - helix angle filtered (HAF)
     #                                 - E2 angle (E2A)
     #                                 - transverse angle (TA)
+    #                                 - HAP [degrees/percent] and HAP_mm [degrees/mm], per slice
+    # hap_coordinate                : 'cubic' (default) or 'centroid_radial' for HAP.
+    # in_plane_spacing_mm           : Physical spacing along array axes 0/1; required for HAP_mm.
+    # compute_hap                   : Set False when the caller computes pitch with its own depth grid.
     """
     ########## Definition Information #############################################################################################################
     ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
@@ -171,6 +175,12 @@ def cDTI_recon(myocardial_mask, Eigenvectors, num_interp_points = 200, smoothnes
     Cardiac_DTI_Metrics['HASF'] = helix_angle_spatial_filtered
     Cardiac_DTI_Metrics['E2A']  = e2_angle
     Cardiac_DTI_Metrics['TA']   = transverse_angle
+    if compute_hap:
+        from cardpy.Data_Processing.HAP import helix_angle_pitch
+        pitch = helix_angle_pitch(helix_angle_spatial_filtered, interpolated_mask,
+                                 in_plane_spacing_mm, coordinate=hap_coordinate)
+        for key in ('HAP', 'HAP_R2', 'HAP_n', 'HAP_mm', 'HAP_mm_R2', 'HAP_mm_n'):
+            Cardiac_DTI_Metrics[key] = pitch[key]
     return [Cardiac_DTI_Metrics, Epicardial_Points_List, Endocardial_Points_List, interpolated_mask]
     
 def Microstructure_Angle_Projections(myocardial_mask, Eigenvector_1, Eigenvector_2, points_epicardium, points_endocardium):

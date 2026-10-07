@@ -1,4 +1,4 @@
-def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLLS'):
+def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLLS', b0_threshold = 0):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -9,6 +9,7 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
                               - Ordinary least-squares (OLS)
                               - Weighted least squeares (WLS)
                               - Non-linear least squares (NLLS)
+    b0_threshold            : Maximum b-value classified as baseline by DIPY (default 0).
     ########## Definition Outputs #################################################################################################################
     Tensor                  : Diffusion tensor
     Eigenvalues             : Python dictionary containing all of the eigenvalues, which can be seen directly below.
@@ -20,26 +21,28 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
                               - Eigenvector 2 (v 2)
                               - Eigenvector 3 (v 3)
     Standard_DTI_Metrics    : Python dictionary containing all of the standard DTI quantitative metrics, which can be seen directly below.
-                              - Mean diffusivity (MD) [scaled to mm^2 / μs]
-                              - Trace (TR) [scaled to mm^2 / μs]
+                              - Mean diffusivity (MD) [scaled to µm^2 / ms]
+                              - Trace (TR) [scaled to µm^2 / ms]
                               - Fractional anisotropy (FA)
                               - Mode (MO)
-                              - Axial diffusivity (AD) [scaled to mm^2 / μs]
-                              - Radial diffusivity (RD) [scaled to mm^2 / μs]
+                              - Axial diffusivity (AD) [scaled to µm^2 / ms]
+                              - Radial diffusivity (RD) [scaled to µm^2 / ms]
     """
     ########## Definition Information #############################################################################################################
     ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
     ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2022
     ########## Import modules #####################################################################################################################
     import numpy                         as np                                                                          # Import numpy module
-    from   cardpy.Data_Sorting           import sorted2stacked, stacked2sorted                                          # Import sorted to stacked and stacked to sorted from CarDpy
+    from   cardpy.Data_Sorting           import sorted2stacked                                          # Import sorted to stacked from CarDpy
     from   dipy.core.gradients           import gradient_table                                                          # Import gradient table from DiPy
     import dipy.reconst.dti              as dti                                                                         # Import DTI reconstruction from DiPy
     ########## Address data type of original data #################################################################################################
-    if original_matrix.dtype == 'complex128':                                                                           # If data type is complex ...
-            original_matrix = np.abs(original_matrix)                                                                       # Convert data to magnitude
+    if np.iscomplexobj(original_matrix):                                                                           # If data type is complex ...
+        original_matrix = np.abs(original_matrix)                                                                       # Convert data to magnitude
     ########## Convert sorted data into stacked data ##############################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)    # Convert sorted data into stacked data
+    if not np.isfinite(stacked_matrix).all():
+        raise ValueError('DTI signals must be finite. Average ADC-filtered repetitions before fitting, or disable ADC filtering.')
     slices     = stacked_matrix.shape[2]
     directions = stacked_matrix.shape[3]
     matrix_slices_list = []
@@ -56,7 +59,8 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
                 matrix_list.append(temp_image)
                 bvals_slices_list[slc].append(stacked_bvals[dif])
                 bvecs_slices_list[slc].append(stacked_bvecs[dif])
-        #print(matrix_list.shape)
+        if not matrix_list:
+            raise ValueError('DTI requires nonempty diffusion images on every slice.')
         matrix_slices_list.append(np.concatenate(matrix_list, axis = 2))
     Tensor_list                = []
     eigenvalue_1_list          = []
@@ -73,7 +77,11 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
     radial_diffusivity_list    = []
     for slc in range(slices):
         ########## Model, fit, and derive diffusion tensor ############################################################################################
-        gtable   = gradient_table(bvals_slices_list[slc], bvecs=bvecs_slices_list[slc])                                           # Create gradient table from b-values and b-vectors
+        if np.unique(bvals_slices_list[slc]).size < 2:
+            raise ValueError('DTI requires at least two b-value shells to separate diffusivity from the fitted intercept.')
+        gtable   = gradient_table(bvals_slices_list[slc], bvecs=bvecs_slices_list[slc], b0_threshold=b0_threshold)                                           # Create gradient table from b-values and b-vectors
+        if np.linalg.matrix_rank(dti.design_matrix(gtable)) < 7:
+            raise ValueError('DTI requires seven independent tensor/intercept terms; check b-values, vectors, and b0_threshold.')
         tenmodel = dti.TensorModel(gtab = gtable, fit_method = tensor_fit)                                                  # Create tensor model from gradient table and tensor fit
         tenfit   = tenmodel.fit(matrix_slices_list[slc])                                                                    # Fit diffusion data to tensor model
         Tensor   = tenfit.quadratic_form                                                                                    # Extract tensor from fitted tensor model
@@ -86,17 +94,17 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
         eigenvector_2               = eigenvectors[:, :, np.newaxis, :, 1]                                                  # Extract eigenvector 2 from tensor fit
         eigenvector_3               = eigenvectors[:, :, np.newaxis, :, 2]                                                  # Extract eigenvector 3 from tensor fit
         ########## Extract mean diffusivity, fractional anisotropy, trace, mode, axial diffusivity, and radial diffusivity #############################
-        mean_diffusivity                                       = dti.mean_diffusivity(tenfit.evals) * 1000                  # Extract mean diffusivity and scale to mm^2 / μs
+        mean_diffusivity                                       = dti.mean_diffusivity(tenfit.evals) * 1000                  # Extract mean diffusivity and scale to µm^2 / ms
         mean_diffusivity                                       = np.clip(mean_diffusivity, 0, 4)                            # Clip mean diffusivity values to be between 0 and 4
         fractional_anisotropy                                  = dti.fractional_anisotropy(tenfit.evals)                    # Extract fractional anisotropy
         fractional_anisotropy[np.isnan(fractional_anisotropy)] = 0                                                          # Make NaN fractional anisotropy set to 0
         fractional_anisotropy                                  = np.clip(fractional_anisotropy, 0, 1)                       # Clip fractional anisotropy values to be between 0 and 1
-        trace                                                  = dti.trace(tenfit.evals) * 1000                             # Extract trace and scale to mm^2 / μs
+        trace                                                  = dti.trace(tenfit.evals) * 1000                             # Extract trace and scale to µm^2 / ms
         trace                                                  = np.clip(trace, 0, 12)                                      # Clip trace values to be between 0 and 12
         mode                                                   = dti.mode(Tensor)                                           # Extract mode
         mode                                                   = np.clip(mode, -1, 1)                                       # Clip mode values to be between -1 and 1
-        axial_diffusivity                                      = dti.axial_diffusivity(tenfit.evals) * 1000                 # Extract axial diffusivity and scale to mm^2 / μs
-        radial_diffusivity                                     = dti.radial_diffusivity(tenfit.evals) * 1000                # Extract radial diffusivity and scale to mm^2 / μs
+        axial_diffusivity                                      = dti.axial_diffusivity(tenfit.evals) * 1000                 # Extract axial diffusivity and scale to µm^2 / ms
+        radial_diffusivity                                     = dti.radial_diffusivity(tenfit.evals) * 1000                # Extract radial diffusivity and scale to µm^2 / ms
         Tensor_list.append(Tensor[:, :, np.newaxis, :, :])
         eigenvalue_1_list.append(eigenvalue_1)
         eigenvalue_2_list.append(eigenvalue_2)

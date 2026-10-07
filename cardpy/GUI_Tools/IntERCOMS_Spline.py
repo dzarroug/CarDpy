@@ -1,3 +1,4 @@
+from cardpy.GUI_Tools._runtime import get_root, wait_window
 import numpy as np
 import tkinter as tk
 import matplotlib.pyplot as plt
@@ -6,7 +7,12 @@ from cardpy.Colormaps import cDTI_Colormaps_Generator
 
 cDTI_cmaps = cDTI_Colormaps_Generator()
 
-def New_GUI(avg_diff_image, ADC_image, E1_image):
+def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_bounds=None, md_max=2.0, point_size=8.0):
+    if gui_version == 'v2':
+        from cardpy.GUI_Tools.IntERCOMS_Spline_v2 import New_GUI as responsive_gui
+        return responsive_gui(avg_diff_image, ADC_image, E1_image, crop_bounds=crop_bounds, md_max=md_max, point_size=point_size)
+    if gui_version != 'legacy':
+        raise ValueError("gui_version must be 'legacy' or 'v2'.")
 
     # import numpy as np
     # import tkinter as tk
@@ -35,7 +41,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
     button_txt_col2 = '#B5C2D9'
     button_txt_col3 = '#B5C2D9'
 
-    class ImagePlotter(tk.Tk):
+    class ImagePlotter(tk.Toplevel):
         from   sys               import platform
         import numpy as np
         from PIL import Image, ImageTk
@@ -58,7 +64,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
     #     button_txt_col3 = '#B5C2D9'
 
         def __init__(self):
-            super().__init__()
+            super().__init__(master=get_root())
             self.title("CarDpy: Beta GUI")
             app_bkg_col    = '#1A2028'    # Dark Blue 1  (Notebook Background)
             app_txt_col    = '#FFEC8E'    # Yellow
@@ -474,7 +480,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
             def plot_delayed():
                 img = Image.fromarray((data * 255).astype(np.uint8))
                 img = img.resize((canvas.winfo_width(), canvas.winfo_height()), Image.LANCZOS)
-                photo = ImageTk.PhotoImage(img)
+                photo = ImageTk.PhotoImage(img, master=self)
                 canvas.create_image(0, 0, anchor=tk.NW, image=photo)
                 canvas.image = photo
 
@@ -483,7 +489,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image):
 
     
     app = ImagePlotter()
-    app.mainloop()
+    wait_window(app)
     endocardium_x  = [x[0] for x in app.endocardium_spline_data[0]]
     endocardium_y  = [x[1] for x in app.endocardium_spline_data[0]]
     epicardium_x   = [x[0] for x in app.epicardium_spline_data[0]]

@@ -84,12 +84,14 @@ def Save_Diffusion_Image_Data(output_path, file_name, header, original_matrix, o
     ########## Write matrix as NifTi ###############################################################################################################
     NifTi_string         = os.path.join(output_path, file_name + ".nii")
     affine_matrix        = np.array([[0, -1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    affine_matrix = affine_matrix.astype(float)
+    affine_matrix[:3, :3] = affine_matrix[:3, :3] @ np.diag([header[axis + ' Resolution'] for axis in ('X', 'Y', 'Z')])
     img                  = nib.Nifti1Image(original_matrix_stacked, affine_matrix)
     img_header           = img.header
     img_header['pixdim'] = [1, header['X Resolution'], header['Y Resolution'], header['Z Resolution'], 1, 1, 1, 1]
     nib.save(img, NifTi_string)
     
-def Save_Primary_Eigenvector_Data(output_path, header, original_matrix, original_bvals, original_bvecs):
+def Save_Primary_Eigenvector_Data(output_path, header, original_matrix, original_bvals, original_bvecs, tensor_fit='NLLS', b0_threshold=0):
     """
     ########## Definition Inputs ##################################################################################################################
     output_path           : Path to save the data to.
@@ -110,13 +112,15 @@ def Save_Primary_Eigenvector_Data(output_path, header, original_matrix, original
     if os.path.isdir(output_path) == False:
         os.makedirs(output_path)
         
-    [_, _, Evecs, _] = DTI_recon(original_matrix, original_bvals, original_bvecs)
+    [_, _, Evecs, _] = DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit=tensor_fit, b0_threshold=b0_threshold)
     shape_3d         = Evecs['E1'].shape[0:3]
-    rgb_arr          = (abs(Evecs['E1']) * 256).astype('u1')
+    rgb_arr          = (np.clip(np.nan_to_num(abs(Evecs['E1'])), 0, 1) * 255).astype('u1')
     rgb_dtype        = np.dtype([('R', 'u1'), ('G', 'u1'), ('B', 'u1')])
     rgb_typed        = rgb_arr.view(rgb_dtype).reshape(shape_3d)
     affine_matrix    = np.array([[0, -1, 0, 0], [-1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
+    affine_matrix = affine_matrix.astype(float)
+    affine_matrix[:3, :3] = affine_matrix[:3, :3] @ np.diag([header[axis + ' Resolution'] for axis in ('X', 'Y', 'Z')])
     img                  = nib.Nifti1Image(rgb_typed, affine_matrix)
     img_header           = img.header
     img_header['pixdim'] = [1, header['X Resolution'], header['Y Resolution'], header['Z Resolution'], 1, 1, 1, 1]

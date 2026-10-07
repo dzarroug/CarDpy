@@ -1,4 +1,4 @@
-def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude'):
+def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude', gui_version = 'legacy', crop_coordinates = None):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -20,9 +20,10 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
     ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2022
     ########## Import modules #####################################################################################################################
+    import cv2
     import numpy                            as np                                                                                                   # Import numpy module
-    from   cardpy.Data_Sorting              import sorted2stacked, stacked2sorted                                                                   # Import sorted to stacked and stacked to sorted from CarDpy
-    from   cardpy.GUI_Tools.IntERACT        import INTERACT_GUI, execute_crop, next_slice, finish_program, update_plots
+    from   cardpy.Data_Sorting              import sorted2stacked                                                                   # Import sorted to stacked from CarDpy
+    from   cardpy.GUI_Tools.IntERACT        import INTERACT_GUI
     from   cardpy.Data_Processing.Denoising import denoise                                                                                          #
     from   skimage.filters.rank             import entropy                                                                                          #
     from   skimage.morphology               import disk                                                                                             #
@@ -34,7 +35,7 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     averages   = original_matrix.shape[4]                                                                                                           # Extract number of averages
     ########## Initialize respiratory matrix and address data type of original data ###############################################################
     respiratory_matrix = np.zeros(original_matrix.shape)                                                                                            # Initialize respiratory matrix
-    if original_matrix.dtype == 'complex128':                                                                                                       # If data type is complex ...
+    if np.iscomplexobj(original_matrix):                                                                                                       # If data type is complex ...
         if operation_type == 'Complex':                                                                                                                 # If operation type is complex ...
             respiratory_matrix = respiratory_matrix.astype(np.complex128)                                                                                  # Cast respiratory matrix for complex data
         if operation_type == 'Magnitude':                                                                                                               # If operation type is magnitude ...
@@ -48,9 +49,16 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     [temporary_matrix_stacked, original_bvals_stacked, original_bvecs_stacked] = sorted2stacked(temporary_matrix, original_bvals, original_bvecs)   #
     ########## ROI Cropping for Image #############################################################################################################
     Slice_Crop_Coortinates = []                                                                                                                     #
-    if zoom == 'ON':                                                                                                                                #
+    if crop_coordinates is not None:
+        from cardpy.GUI_Tools._image_controls import crop_bounds
+        if len(crop_coordinates) != 4 or any(len(values) != slices for values in crop_coordinates):
+            raise ValueError('Respiratory crop coordinates must contain four lists, one value per slice.')
+        bounds = [crop_bounds([values[slc] for values in crop_coordinates], original_matrix.shape)
+                  for slc in range(slices)]
+        Slice_Crop_Coordinates = [list(values) for values in zip(*bounds)]
+    elif zoom == 'ON':                                                                                                                                #
         if IntERACT_zoom == 'ON':                                                                                                                       #
-            [x_start, x_end, y_start, y_end] = INTERACT_GUI(temporary_matrix_stacked, organ)                                                            #
+            [x_start, x_end, y_start, y_end] = INTERACT_GUI(temporary_matrix_stacked, organ, gui_version=gui_version)                                                            #
             Slice_Crop_Coordinates = [x_start, x_end, y_start, y_end]                                                                                   #
         if IntERACT_zoom == 'OFF':                                                                                                                  #
             print('Interact is off')                                                                                                                    #
@@ -76,17 +84,17 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
                 cv2.waitKey(1)
                 cv2.waitKey(1)
             Slice_Crop_Coordinates = [x_start, x_end, y_start, y_end]
-    if zoom == 'OFF':
+    elif zoom == 'OFF':
         x_start = []
         x_end   = []
         y_start = []
         y_end   = []
         temporary_matrix_list = []
-        for slc in range(original_matrix_stacked.shape[2]):
+        for slc in range(temporary_matrix_stacked.shape[2]):
             x_start.append(int(0))
-            x_end.append(int(original_matrix_stacked.shape[1]))
+            x_end.append(int(temporary_matrix_stacked.shape[1]))
             y_start.append(int(0))
-            y_end.append(int(original_matrix_stacked.shape[0]))
+            y_end.append(int(temporary_matrix_stacked.shape[0]))
         Slice_Crop_Coordinates = [x_start, x_end, y_start, y_end]
 
     ### Extract Crop Coordinates

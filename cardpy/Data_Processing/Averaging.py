@@ -1,14 +1,14 @@
 def average(original_matrix, original_bvals = [], original_bvecs = [], operation_type = 'Magnitude'):
     """
     ########## Definition Inputs ##################################################################################################################
-    original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
+    original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]) or an encoding dictionary.
     original_bvals          : Sorted b-values (Optional).
     original_bvecs          : Sorted b-vectors (Optional).
     operation_type          : Identify the type of operation for original matrix (Optional).
                               Default operation type is magnitude.
                               Operation type options include Magnitude and Complex.
     ########## Definition Outputs #################################################################################################################
-    averaged_matrix         : Sorted averaged diffusion data (5D - [rows, columns, slices, directions, singleton dimension]).
+    averaged_matrix         : Sorted averaged diffusion data (5D) or a dictionary with one repetition per encoding.
     averaged_bvals          : Sorted b-values (Optional).
     averaged_bvecs          : Sorted b-vectors (Optional).
     ########## References #########################################################################################################################
@@ -29,7 +29,26 @@ def average(original_matrix, original_bvals = [], original_bvecs = [], operation
     import numpy               as     np                                                                                            # Import numpy module
     from   cardpy.FT_Operators import fft2c, ifft2c                                                                                 # Import Fourier transform operators from CarDpy
     ########## Address data type of original data and average along 5th dimension #################################################################
-    if original_matrix.dtype == 'complex128':                                                                                       # If data type is complex ...
+    if isinstance(original_matrix, dict):
+        if not original_matrix:
+            raise ValueError('The encoding dictionary is empty.')
+        averaged_encodings = {}
+        for key, encoding in original_matrix.items():
+            images = np.asarray(encoding['images'])
+            if images.ndim != 4 or images.shape[3] == 0:
+                raise ValueError('Dictionary images must have shape [rows, columns, slices, repetitions] with at least one repetition.')
+            # Reuse the array implementation, including phase correction before
+            # complex averaging. Each encoding can have its own repetition count.
+            averaged_images, _, _ = average(
+                images[:, :, :, np.newaxis, :], operation_type=operation_type)
+            averaged_encodings[key] = {
+                **encoding,
+                'images': averaged_images[:, :, :, 0, :],
+            }
+        return [averaged_encodings,
+                np.asarray([encoding['bval'] for encoding in averaged_encodings.values()]),
+                np.asarray([encoding['bvec'] for encoding in averaged_encodings.values()])]
+    if np.iscomplexobj(original_matrix):                                                                                       # If data type is complex ...
         if operation_type == 'Complex':                                                                                                 # If operation type is complex ...
             rows                            = original_matrix.shape[0]                                                                      # Extract number of rows
             columns                         = original_matrix.shape[1]                                                                      # Extract number of columns

@@ -10,6 +10,14 @@ DEFAULT_CONFIG = {
     "dicom_subpath":    "02_cDTI/SAX/cDTI_SF_b350_RL_71",   # path to DICOM series inside study folder
     "slice_index":      [3],           # list of slice indices, or None for all
 
+    ### ---- Interactive tools ----
+    "gui": {
+        "point_size":        8.0,       # v2 marker diameter, in display points (3–20)
+        "version":           "legacy",  # "legacy" / "v2" (box crop + responsive contouring)
+        "segmentation_zoom": True,      # v2: reuse the rejection crop for contouring
+        "md_max":            2.0,       # v2 display maximum, in µm^2/ms
+    },
+
     ### ---- Gibbs ringing removal ----
     "gibbs": {
         "enabled": True,
@@ -37,6 +45,7 @@ DEFAULT_CONFIG = {
     "registration": {
         "enabled":            True,
         "algorithm":          "Affine",   # Affine / Rigid / Translation
+        "mode":               "2D",       # 2D / 3D (3D requires Rigid)
         "temporary_denoising": "OFF",
     },
 
@@ -71,12 +80,14 @@ DEFAULT_CONFIG = {
     ### ---- DTI reconstruction ----
     "dti": {
         "tensor_fit": "NLLS",
+        "b0_threshold": 0,  # classify only true b0 as baseline; preserve measured b50 weighting
     },
 
     ### ---- cDTI analysis (post-contour) ----
     "cdti": {
         "num_interp_points": 200,
         "smoothness_level":  "Low",
+        "hap_coordinate":    "cubic",  # cubic / centroid_radial; HAP_mm always radial
         "helix_angle_filter": {
             "linear_outlier_stdev":    1,
             "spatial_wall_depth_factor": 0.25,

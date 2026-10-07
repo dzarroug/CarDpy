@@ -17,7 +17,7 @@ def DWI_recon(original_matrix, original_bvals, original_bvecs):
     from   cardpy.Data_Sorting           import sorted2stacked, stacked2sorted                                                  # Import sorted to stacked and stacked to sorted from CarDpy
     import warnings                                                                                                             # Import warning module
     ########## Address data type of original data #################################################################################################
-    if original_matrix.dtype == 'complex128':                                                                                   # If data type is complex ...
+    if np.iscomplexobj(original_matrix):                                                                                   # If data type is complex ...
             original_matrix = np.abs(original_matrix)                                                                               # Convert data to magnitude
     ########## Convert sorted data into stacked data ##############################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)            # Convert sorted data into stacked data

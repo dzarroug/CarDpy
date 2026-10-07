@@ -1,3 +1,5 @@
+from cardpy.GUI_Tools._runtime import create_window, wait_window
+
 def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_Width = None):
     from   sys                               import platform
     import tkinter                           as tk
@@ -86,8 +88,8 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
         Endo_Axes.append([])
         Epi_Axes.append([])
     # root window
-    root = tk.Tk()
-    var = tk.IntVar()
+    root = create_window('CarDpy')
+    var = tk.IntVar(master=root)
     if platform == 'darwin':
         from tkmacosx import Button
     else:
@@ -530,7 +532,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
                           relx      = 0.45,
                           rely      = 0.875)
         Next_Button["state"] = "disabled"
-    root.mainloop()
+    wait_window(root)
     return [Endo_Centers, Endo_Axes, Epi_Centers, Epi_Axes]
 
 def set_window():

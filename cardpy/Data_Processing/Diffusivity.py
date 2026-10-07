@@ -1,53 +1,64 @@
-def ADC_Filter(original_matrix, original_bvals, original_bvecs, operation_type = 'Magnitude'):
+"""Reject implausibly high apparent diffusivity within each encoding."""
+# Original implementation by Tyler E. Cork, CMR Group, Stanford University, 2022.
+import numpy as np
+
+
+def ADC_Filter(original_matrix, original_bvals=None, original_bvecs=None,
+               operation_type='Magnitude', max_diffusivity=3.0):
+    """Filter repetitions using their actual b-value difference from low b.
+
+    ########## Definition Inputs ##############################################
+    original_matrix : Sorted 5D data or an encoding dictionary.
+    original_bvals  : One measured b-value per encoding (array input).
+    original_bvecs  : One three-component b-vector per encoding (array input).
+    ########## Definition Outputs #############################################
+    Filtered data, b-values, and b-vectors; rejected samples are NaN.
+
+    Low-shell images are pooled into a magnitude reference. The threshold is
+    in µm²/ms. If every repetition exceeds it at a voxel, retain the lowest
+    ADC repetition, as in the original filter. Encoding dictionaries preserve
+    variable repetition counts, including directional low-b acquisitions.
     """
-    ########## Definition Inputs ##################################################################################################################
-    original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
-    original_bvals          : Sorted b-values (Optional).
-    original_bvecs          : Sorted b-vectors (Optional).
-    operation_type          : Identify the type of operation for original matrix (Optional).
-                              Default operation type is magnitude.
-                              Operation type options include Magnitude and Complex.
-    ########## Definition Outputs #################################################################################################################
-    averaged_matrix         : Sorted ADC filtered diffusion data (5D - [rows, columns, slices, directions, singleton dimension]).
-    averaged_bvals          : Sorted b-values (Optional).
-    averaged_bvecs          : Sorted b-vectors (Optional).
-    """
-    ########## Definition Information #############################################################################################################
-    ### Written by Tyler E. Cork, tyler.e.cork@gmail.com
-    ### Cardiac Magnetic Resonance (CMR) Group, Leland Stanford Jr University, 2023
-    ########## Import modules #####################################################################################################################
-    import numpy as     np                                                                                                                          # Import numpy module
-    ########## Detection of different b-values ####################################################################################################
-    (unique, index, counts) = np.unique(original_bvals, return_counts = True, return_index = True, axis = 0)                                        # Extract number of different diffusion directions
-    numBvals                = len(unique)                                                                                                           # Identify number of b-values in stacked b-values
-    bval_low                = min(unique)                                                                                                           # Identify lower b-value (typically b = 0)
-    bval_low_indicies       = np.where(original_bvals == bval_low)[0]                                                                               # Identify index of lower b-value in stacked b-values
-    bval_high               = max(unique)                                                                                                           # Identify higher b-value
-    bval_high_indicies      = np.where(original_bvals == bval_high)[0]                                                                              #
-    ###
-    filtered_matrix = np.copy(original_matrix)                                                                                                      #
-    temp_matrix     = np.abs(original_matrix)                                                                                                       #
-    for dif in range(original_matrix.shape[3]):                                                                                                     #
-        if dif in bval_low_indicies:                                                                                                                    #
-            print('Low b value, nothing computed')                                                                                                          #
-        else:                                                                                                                                           #
-            for slc in range(original_matrix.shape[2]):                                                                                                     #
-                for col in range(original_matrix.shape[1]):                                                                                                     #
-                    for row in range(original_matrix.shape[0]):                                                                                                     #
-                        b    = bval_high - bval_low                                                                                                                     # Calculate effective b-value
-                        S_0  = temp_matrix[row, col, slc, bval_low_indicies[0], :]                                                                                      # Extract lower b-value matrix from original matrix
-                        S_x  = temp_matrix[row, col, slc, dif, :]                                                                                                       # Extract higher b-value matrix from original matrix in the x direction
-                        D_xx = -(1 / b) * np.log(S_x / S_0)                                                                                                             # Calculate x diffusion coefficient
-                        D_xx = D_xx * 1000                                                                                                                              #
-                        if all(x >= 3 for x in D_xx):                                                                                                                   #
-                            min_val = min(D_xx)                                                                                                                             #
-                            for avg in range(len(D_xx)):                                                                                                                    #
-                                if D_xx[avg] != min_val:                                                                                                                        #
-                                    filtered_matrix[row, col, slc, dif, avg] = np.nan                                                                                               #
-                        else:                                                                                                                                           #
-                            for avg in range(len(D_xx)):                                                                                                                    #
-                                if D_xx[avg] >= 3:                                                                                                                              #
-                                    filtered_matrix[row, col, slc, dif, avg] = np.nan                                                                                               #
-    filtered_bvals  = original_bvals                                                                                                                # Store b-values
-    filtered_bvecs  = original_bvecs                                                                                                                # Store b-vectors
-    return [filtered_matrix, filtered_bvals, filtered_bvecs]
+    if operation_type not in ('Magnitude', 'Complex'):
+        raise ValueError("operation_type must be 'Magnitude' or 'Complex'.")
+    if not np.isfinite(max_diffusivity) or max_diffusivity <= 0:
+        raise ValueError('max_diffusivity must be positive and finite.')
+    dictionary = isinstance(original_matrix, dict)
+    if dictionary:
+        if not original_matrix:
+            raise ValueError('The encoding dictionary is empty.')
+        entries = list(original_matrix.values())
+        bvals = np.asarray([e['bval'] for e in entries])
+        images = [np.asarray(e['images']) for e in entries]
+    else:
+        data = np.asarray(original_matrix)
+        bvals = np.asarray(original_bvals)
+        if data.ndim != 5 or bvals.shape != (data.shape[3],):
+            raise ValueError('ADC filtering requires matching 5D data and encodings.')
+        images = [data[..., dif, :] for dif in range(data.shape[3])]
+    if not np.isfinite(bvals).all() or len(np.unique(bvals)) < 2:
+        raise ValueError('ADC filtering requires at least two finite b-value shells.')
+    low = float(np.min(bvals))
+    reference = np.nanmean(np.concatenate(
+        [np.abs(image) for image, bval in zip(images, bvals) if bval == low], axis=3), axis=3)
+    filtered = []
+    for image, bval in zip(images, bvals):
+        out = np.array(np.abs(image) if operation_type == 'Magnitude' else image,
+                       dtype=np.complex128 if operation_type == 'Complex' and np.iscomplexobj(image) else float,
+                       copy=True)
+        if bval > low:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                adc = -1000.0 * np.log(np.abs(image) / reference[..., None]) / (bval - low)
+            rejected = adc >= max_diffusivity
+            all_rejected = np.all(rejected, axis=3)
+            best = np.argmin(np.where(np.isnan(adc), np.inf, adc), axis=3)
+            # Unreject the best shot only where all shots were rejected.
+            best_mask = np.arange(image.shape[3]) == best[..., None]
+            rejected &= ~(all_rejected[..., None] & best_mask)
+            out[rejected] = np.nan
+        filtered.append(out)
+    if dictionary:
+        encodings = {key: {**encoding, 'images': image}
+                     for (key, encoding), image in zip(original_matrix.items(), filtered)}
+        return [encodings, bvals, np.asarray([e['bvec'] for e in entries])]
+    return [np.stack(filtered, axis=3), original_bvals, original_bvecs]
