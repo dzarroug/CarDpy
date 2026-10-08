@@ -16,6 +16,8 @@ class CropWindow:
         self.bounds = crop_bounds(None, self.matrix.shape)
         self.result = None
         self.window = create_window('CarDpy: Box Crop — ' + str(organ))
+        ttk.Style(self.window).configure('CardpyV2.TButton',
+                                         font=('Verdana', 12), padding=(10, 6))
         size_window(self.window)
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(1, weight=1)
@@ -30,12 +32,12 @@ class CropWindow:
             props={'edgecolor': '#61ba86', 'facecolor': '#61ba86', 'alpha': 0.3, 'linewidth': 2})
         footer = ttk.Frame(self.window, padding=8)
         footer.grid(row=2, column=0, sticky='ew')
-        ttk.Button(footer, text='Cancel', command=self.cancel).pack(side='left')
-        ttk.Button(footer, text='Draw new box', command=self.selector.clear).pack(side='left', padx=6)
-        ttk.Button(footer, text='Full image', command=self.reset).pack(side='left', padx=6)
-        self.back_button = ttk.Button(footer, text='Back', command=self.back)
+        ttk.Button(footer, style='CardpyV2.TButton', text='Cancel', command=self.cancel).pack(side='left')
+        ttk.Button(footer, style='CardpyV2.TButton', text='Draw new box', command=self.selector.clear).pack(side='left', padx=6)
+        ttk.Button(footer, style='CardpyV2.TButton', text='Full image', command=self.reset).pack(side='left', padx=6)
+        self.back_button = ttk.Button(footer, style='CardpyV2.TButton', text='Back', command=self.back)
         self.back_button.pack(side='left', padx=6)
-        self.next_button = ttk.Button(footer, command=self.next_slice)
+        self.next_button = ttk.Button(footer, style='CardpyV2.TButton', command=self.next_slice)
         self.next_button.pack(side='right')
         self.update_box()
 

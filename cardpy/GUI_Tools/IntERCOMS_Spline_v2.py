@@ -1,6 +1,7 @@
 """Responsive contouring with synchronized zoom and per-image display controls."""
+import json
 import numpy as np
-from tkinter import ttk
+from tkinter import ttk, filedialog, messagebox
 from scipy.interpolate import splprep, splev
 from matplotlib.widgets import RectangleSelector
 from cardpy.Colormaps import cDTI_Colormaps_Generator
@@ -46,6 +47,8 @@ class ContourWindow:
         self.pending_layout = None
         self.wide = None
         self.window = create_window('CarDpy: Contouring v2')
+        ttk.Style(self.window).configure('CardpyV2.TButton',
+                                         font=('Verdana', 12), padding=(10, 6))
         size_window(self.window)
         self.window.protocol('WM_DELETE_WINDOW', self.cancel)
         self.window.columnconfigure(0, weight=1)
@@ -54,15 +57,15 @@ class ContourWindow:
         toolbar.grid(row=0, column=0, sticky='ew')
         self.stage_buttons = []
         for column, (stage, label) in enumerate(zip(self.stages, self.labels)):
-            button = ttk.Button(toolbar, text=label, command=lambda s=stage: self.edit(s))
+            button = ttk.Button(toolbar, style='CardpyV2.TButton', text=label, command=lambda s=stage: self.edit(s))
             button.grid(row=0, column=column, padx=3, pady=3, sticky='ew')
             self.stage_buttons.append(button)
             toolbar.columnconfigure(column, weight=1)
-        ttk.Style(self.window).configure('CardpyConfirm.TButton', font=('Verdana', 12, 'bold'), padding=(12, 10))
+        ttk.Style(self.window).configure('CardpyConfirm.TButton', font=('Verdana', 13, 'bold'), padding=(14, 12))
         self.confirm_button = ttk.Button(toolbar, command=self.confirm, style='CardpyConfirm.TButton')
         self.confirm_button.grid(row=1, column=0, columnspan=2, padx=3, pady=6, sticky='ew')
-        ttk.Button(toolbar, text='Undo edit (d)', command=self.undo).grid(row=1, column=2, padx=3, pady=3, sticky='ew')
-        ttk.Button(toolbar, text='Draw zoom box', command=self.start_zoom).grid(row=1, column=3, padx=3, pady=3, sticky='ew')
+        ttk.Button(toolbar, style='CardpyV2.TButton', text='Undo edit (d)', command=self.undo).grid(row=1, column=2, padx=3, pady=3, sticky='ew')
+        ttk.Button(toolbar, style='CardpyV2.TButton', text='Draw zoom box', command=self.start_zoom).grid(row=1, column=3, padx=3, pady=3, sticky='ew')
         point_controls = ttk.Frame(toolbar)
         point_controls.grid(row=2, column=0, columnspan=4, pady=3)
         ttk.Label(point_controls, text='Point size').pack(side='left', padx=6)
@@ -96,14 +99,15 @@ class ContourWindow:
         self.zoom_selector.set_active(False)
         footer = ttk.Frame(self.window, padding=8)
         footer.grid(row=3, column=0, sticky='ew')
-        ttk.Button(footer, text='Cancel', command=self.cancel).pack(side='left')
-        ttk.Button(footer, text='Full image', command=lambda: self.set_zoom(None)).pack(side='left', padx=6)
-        ttk.Button(footer, text='Reset to crop', command=lambda: self.set_zoom(self.initial_crop)).pack(side='left', padx=6)
+        ttk.Button(footer, style='CardpyV2.TButton', text='Cancel', command=self.cancel).pack(side='left')
+        ttk.Button(footer, style='CardpyV2.TButton', text='Full image', command=lambda: self.set_zoom(None)).pack(side='left', padx=6)
+        ttk.Button(footer, style='CardpyV2.TButton', text='Reset to crop', command=lambda: self.set_zoom(self.initial_crop)).pack(side='left', padx=6)
+        ttk.Button(footer, style='CardpyV2.TButton', text='Save crop', command=self.save_crop).pack(side='left', padx=6)
         self.panel_choice = ttk.Combobox(footer, state='readonly', width=23,
                                        values=('Magnitude', 'MD', 'Primary eigenvector'))
         self.panel_choice.current(0)
         self.panel_choice.bind('<<ComboboxSelected>>', lambda event: self.layout())
-        self.finish_button = ttk.Button(footer, text='Save contours & Finish', command=self.finish, state='disabled')
+        self.finish_button = ttk.Button(footer, style='CardpyV2.TButton', text='Save contours & Finish', command=self.finish, state='disabled')
         self.finish_button.pack(side='right')
         self.window.bind('<Configure>', self.resize)
         self.window.bind('<ButtonRelease-1>', self.release_point, add='+')
@@ -304,6 +308,21 @@ class ContourWindow:
         for panel in self.panels:
             panel.set_zoom(self.current_crop)
 
+    def save_crop(self):
+        path = filedialog.asksaveasfilename(
+            parent=self.window, title='Save display crop', defaultextension='.json',
+            initialfile='Display_Crop.json', filetypes=[('JSON', '*.json')])
+        if not path:
+            return
+        try:
+            with open(path, 'w') as handle:
+                json.dump({'image_shape': list(self.shape),
+                           'crop_bounds': list(self.current_crop)}, handle, indent=2)
+        except OSError as error:
+            messagebox.showerror('Save crop failed', str(error), parent=self.window)
+            return
+        self.update_status('Display crop saved. Bounds are [x_start, x_end, y_start, y_end] in image pixels.')
+
     def finish(self):
         if not all(self.confirmed.values()):
             self.update_status('Confirm both contours and both RV insertion points before finishing.')
@@ -327,9 +346,9 @@ class ContourWindow:
         self.close()
 
 
-def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=2.0, point_size=8.0):
+def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=2.0, point_size=8.0, return_crop=False):
     app = ContourWindow(avg_diff_image, ADC_image, E1_image, bounds=crop_bounds, md_max=md_max, point_size=point_size)
     wait_window(app.window)
     if app.result is None:
         raise RuntimeError('Contour selection cancelled.')
-    return app.result
+    return (app.result, app.current_crop.copy()) if return_crop else app.result

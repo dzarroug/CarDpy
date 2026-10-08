@@ -1,4 +1,5 @@
 import os
+import json
 import warnings
 import numpy as np
 
@@ -154,14 +155,19 @@ def _load(study_root, config):
     return matrix, bvals, bvecs, Header
 
 
-def process(study_root, config, save=True):
+def process(study_root, config, save=True, segmentation=None):
     """
     Run the full CarDpy pipeline end to end in one call.
     Stalls at the contouring GUI (once per slice) until each window is closed,
     then resumes automatically. Writes stage outputs to CarDpy_Output when
     save=True. Returns a dict of results.
+    For stationary phantom scans on the same image grid, pass the first result's
+    segmentation dict to reuse its contours and display crops without opening
+    contour windows. A saved 11_Segmentation/Segmentation.json can also be loaded
+    with json.load and passed here.
     """
-    out_path = os.path.join(study_root, "CarDpy_Output")
+    out_path = config.get("output", {}).get("directory") or os.path.join(study_root, "CarDpy_Output")
+    out_path = os.path.abspath(os.path.expanduser(os.fspath(out_path)))
     if save:
         os.makedirs(out_path, exist_ok=True)
 
@@ -400,26 +406,62 @@ def process(study_root, config, save=True):
     # ===== DTI recon =====
     _, _, Eigenvectors, Standard_DTI_Metrics = DTI_recon(m, b, v, tensor_fit=config["dti"]["tensor_fit"], b0_threshold=b0_threshold)
 
-    # ===== Contouring =====
-    endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
-    for slc in range(m.shape[2]):
-        diffusion = b > np.min(b)
-        avg_diff = np.nanmean(np.abs(m[:, :, slc, diffusion, :]), axis=(2, 3))
-        MD       = Standard_DTI_Metrics['MD'][:, :, slc]
-        E1       = Eigenvectors['E1'][:, :, slc, :]
-        if gui_version == 'v2':
-            bounds = None
-            if gui.get("segmentation_zoom", True) and segmentation_crop is not None:
-                from cardpy.GUI_Tools._image_controls import scale_crop
-                bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
-                                    crop_shape, m.shape[:2])
-            ex, ey, px, py, aRV, iRV = New_GUI(
-                avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
-                md_max=gui.get("md_max", 2.0), point_size=gui.get("point_size", 8.0))
-        else:
-            ex, ey, px, py, aRV, iRV = New_GUI(avg_diff, MD, E1)
-        endo_x.append([ex]); endo_y.append([ey]); epi_x.append([px])
-        epi_y.append([py]); antRVIP.append([aRV]); infRVIP.append([iRV])
+    # ===== Contouring (optionally reuse a stationary phantom segmentation) =====
+    image_shape = list(m.shape[:3])
+    voxel_spacing = [float(Header.get(axis + ' Resolution', spacing[index]))
+                     for index, axis in enumerate(('X', 'Y', 'Z'))]
+    selected_slices = config.get('slice_index')
+    if selected_slices is not None:
+        selected_slices = [int(index) for index in selected_slices]
+    if segmentation is not None:
+        if (list(segmentation['image_shape']) != image_shape
+                or segmentation['slice_index'] != selected_slices
+                or not np.allclose(segmentation['voxel_spacing'], voxel_spacing,
+                                   rtol=1e-5, atol=1e-8)):
+            raise ValueError('Reused segmentation requires matching image shape, voxel spacing and slice selection. Redraw the phantom mask.')
+        from cardpy.GUI_Tools._image_controls import crop_bounds
+        contours = segmentation['contours']
+        endo_x, endo_y = contours['endo_x'], contours['endo_y']
+        epi_x, epi_y = contours['epi_x'], contours['epi_y']
+        antRVIP, infRVIP = contours['antRVIP'], contours['infRVIP']
+        if any(len(values) != m.shape[2] for values in
+               (endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP, segmentation['crop_bounds'])):
+            raise ValueError('Reused segmentation must contain contours and a crop for every slice.')
+        display_crops = [crop_bounds(bounds, m.shape[:2]) for bounds in segmentation['crop_bounds']]
+        print('Reusing phantom contours and display crops.')
+    else:
+        display_crops = []
+        endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
+        for slc in range(m.shape[2]):
+            diffusion = b > np.min(b)
+            avg_diff = np.nanmean(np.abs(m[:, :, slc, diffusion, :]), axis=(2, 3))
+            MD       = Standard_DTI_Metrics['MD'][:, :, slc]
+            E1       = Eigenvectors['E1'][:, :, slc, :]
+            if gui_version == 'v2':
+                bounds = None
+                if gui.get("segmentation_zoom", True) and segmentation_crop is not None:
+                    from cardpy.GUI_Tools._image_controls import scale_crop
+                    bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
+                                        crop_shape, m.shape[:2])
+                contour, bounds = New_GUI(
+                    avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
+                    md_max=gui.get("md_max", 2.0), point_size=gui.get("point_size", 8.0),
+                    return_crop=True)
+                ex, ey, px, py, aRV, iRV = contour
+            else:
+                ex, ey, px, py, aRV, iRV = New_GUI(avg_diff, MD, E1)
+                bounds = [0, m.shape[1], 0, m.shape[0]]
+            display_crops.append(bounds)
+            endo_x.append([ex]); endo_y.append([ey]); epi_x.append([px])
+            epi_y.append([py]); antRVIP.append([aRV]); infRVIP.append([iRV])
+
+    segmentation_data = {
+        'image_shape': image_shape, 'voxel_spacing': voxel_spacing,
+        'slice_index': selected_slices, 'crop_bounds': display_crops,
+        'contours': {key: np.asarray(values).tolist() for key, values in
+                     (('endo_x', endo_x), ('endo_y', endo_y), ('epi_x', epi_x),
+                      ('epi_y', epi_y), ('antRVIP', antRVIP), ('infRVIP', infRVIP))},
+    }
 
     # ===== Masks =====
     myocardium_mask = np.zeros([m.shape[0], m.shape[1], m.shape[2]])
@@ -434,6 +476,8 @@ def process(study_root, config, save=True):
         seg_path = os.path.join(out_path, '11_Segmentation')
         os.makedirs(seg_path, exist_ok=True)
         Save_NRRD_Segmentation(myocardium_mask, Header, seg_path, 'LV_Myocardium')
+        with open(os.path.join(seg_path, 'Segmentation.json'), 'w') as handle:
+            json.dump(segmentation_data, handle, indent=2)
 
     # ===== cDTI analysis =====
     c    = config["cdti"]
@@ -486,6 +530,8 @@ def process(study_root, config, save=True):
         "bvals":           b,
         "bvecs":           v,
         "header":          Header,
+        "segmentation":    segmentation_data,
+        "crop_bounds":     display_crops,
         "contours":        {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                             "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP},
     }
