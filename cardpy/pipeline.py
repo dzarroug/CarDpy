@@ -445,7 +445,7 @@ def process(study_root, config, save=True, segmentation=None):
                                         crop_shape, m.shape[:2])
                 contour, bounds = New_GUI(
                     avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
-                    md_max=gui.get("md_max", 2.0), point_size=gui.get("point_size", 8.0),
+                    md_max=gui.get("md_max", 3.0), point_size=gui.get("point_size", 8.0),
                     return_crop=True)
                 ex, ey, px, py, aRV, iRV = contour
             else:

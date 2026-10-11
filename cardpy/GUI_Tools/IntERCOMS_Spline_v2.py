@@ -26,7 +26,7 @@ class ContourWindow:
     labels = ('Epicardium', 'Endocardium', 'Anterior RV insertion', 'Inferior RV insertion')
     colors = ('#61ba86', '#ef7070', '#54d5ef', '#d17ef0')
 
-    def __init__(self, magnitude, MD, E1, bounds=None, md_max=2.0, point_size=8.0):
+    def __init__(self, magnitude, MD, E1, bounds=None, md_max=3.0, point_size=8.0):
         magnitude, MD, E1 = np.asarray(magnitude), np.asarray(MD), np.asarray(E1)
         if magnitude.ndim != 2 or MD.shape != magnitude.shape or E1.shape != magnitude.shape + (3,):
             raise ValueError('Contouring requires matching magnitude / MD images and an E1 image with three components.')
@@ -346,7 +346,7 @@ class ContourWindow:
         self.close()
 
 
-def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=2.0, point_size=8.0, return_crop=False):
+def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=3.0, point_size=8.0, return_crop=False):
     app = ContourWindow(avg_diff_image, ADC_image, E1_image, bounds=crop_bounds, md_max=md_max, point_size=point_size)
     wait_window(app.window)
     if app.result is None:

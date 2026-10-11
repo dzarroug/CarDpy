@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
         "point_size":        8.0,       # v2 marker diameter, in display points (3–20)
         "version":           "legacy",  # "legacy" / "v2" (box crop + responsive contouring)
         "segmentation_zoom": True,      # v2: reuse the rejection crop for contouring
-        "md_max":            2.0,       # v2 display maximum, in µm^2/ms
+        "md_max":            3.0,       # v2 display maximum, in µm^2/ms
     },
 
     ### ---- Gibbs ringing removal ----
