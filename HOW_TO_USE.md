@@ -135,10 +135,25 @@ config["e1"]["enabled"]              = True
 ```python
 config["rejection"]["nrmse_threshold"] = 0.75    # 0.0 - 1.0
 config["rejection"]["nssim_threshold"] = 0.75    # 0.0 - 1.0
+config["rejection"]["manual_review"]   = False   # optional review of automatic decisions
 config["rejection"]["zoom"]            = "ON"
 config["rejection"]["interact_zoom"]   = "ON"
 config["rejection"]["organ"]           = "Heart"   # display label on the crop window only; does not change cropping
 ```
+
+Set `config["rejection"]["manual_review"] = True` to inspect automatic decisions
+before replacement. Click a thumbnail (or focus it and press Space/Enter) to
+reject or restore that acquisition. Green means keep; red means reject. The
+`Auto` label preserves the original automatic decision. Use **Previous slice**
+and **Next slice** to review every slice; **Reset slice to automatic** restores
+only the current slice. **Apply all slices** applies all edits. **Cancel** or
+closing the window stops processing without applying the review.
+
+Rejected repetitions are replaced only from retained repetitions of the same
+encoding and slice. If all repetitions of an encoding are rejected, repetition
+0 is retained as the replacement source (including singleton encodings).
+Statistics still report the rejection decisions, so an encoding with no accepted
+repetitions has an acceptance rate of 0% even when this fallback retains data.
 
 **Respiratory**
 ```python

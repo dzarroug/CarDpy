@@ -252,6 +252,7 @@ def process(study_root, config, save=True, segmentation=None):
             NRMSE_threshold=r["nrmse_threshold"], NSSIM_threshold=r["nssim_threshold"],
             zoom=r["zoom"], IntERACT_zoom=r["interact_zoom"], organ=r["organ"],
             operation_type=op, diagnostics_path=out_path, gui_version=gui_version,
+            manual_review=r.get("manual_review", False),
             save_diagnostics=save and config.get("output", {}).get("save_diagnostics", True))
         if gui_version == 'v2' and len(Slice_Coordinates) == 4:
             segmentation_crop = Slice_Coordinates

@@ -2,6 +2,17 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
     """Map stacked rejection decisions back to variable-length encodings."""
     import numpy as np
 
+    dictionary_items = list(dictionary_items)
+    keep_matrix_stacked = np.asarray(keep_matrix_stacked)
+    if (keep_matrix_stacked.ndim != 2
+            or keep_matrix_stacked.shape[1] != sum(item[2] for item in dictionary_items)
+            or not np.isin(keep_matrix_stacked, [0, 1]).all()):
+        raise ValueError('Binary rejection decisions must match the dictionary images.')
+    for _, encoding, repetitions in dictionary_items:
+        images = np.asarray(encoding['images'])
+        if (images.ndim != 4 or images.shape[2:] != (keep_matrix_stacked.shape[0], repetitions)
+                or repetitions == 0):
+            raise ValueError('Dictionary images must match the decision slices and repetitions.')
     accepted_encodings = {}
     stats_by_encoding = {}
     keep_by_encoding = {}
@@ -31,13 +42,41 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
         raise ValueError('Dictionary repetitions do not match the stacked rejection decisions.')
     return accepted_encodings, stats_by_encoding, keep_by_encoding
 
+def _apply_sorted_keep(matrix, keep_matrix_stacked):
+    """Undo repetition-major stacking without regrouping diffusion encodings."""
+    import numpy as np
 
-def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True):
+    matrix = np.asarray(matrix)
+    keep = np.asarray(keep_matrix_stacked)
+    if matrix.ndim != 5 or any(size == 0 for size in matrix.shape):
+        raise ValueError('Sorted images must be a nonempty 5D array.')
+    expected = (matrix.shape[2], matrix.shape[3] * matrix.shape[4])
+    if keep.shape != expected or not np.isin(keep, [0, 1]).all():
+        raise ValueError('Binary rejection decisions must match the sorted images.')
+    keep_sorted = keep.reshape(matrix.shape[2], matrix.shape[4], matrix.shape[3]).swapaxes(1, 2).copy()
+    accepted = matrix.copy()
+    for slc in range(matrix.shape[2]):
+        for encoding in range(matrix.shape[3]):
+            good = np.flatnonzero(keep_sorted[slc, encoding] == 1)
+            bad = np.flatnonzero(keep_sorted[slc, encoding] == 0)
+            if good.size == 0:
+                print('All repetitions were rejected for slice %i, encoding %i; retaining repetition 0.'
+                      % (slc + 1, encoding + 1))
+                good = np.asarray([0])
+            for repetition in bad:
+                replacement = int(np.random.choice(good, 1)[0])
+                accepted[:, :, slc, encoding, repetition] = matrix[:, :, slc, encoding, replacement]
+    return accepted, np.mean(keep_sorted, axis=2) * 100, keep_sorted
+
+
+def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
     original_bvals        : Sorted b-values.
     original_bvecs        : Sorted b vectors.
+    manual_review         : Open an optional image grid to edit automatic keep/reject decisions.
+                            Closing or cancelling the review aborts rejection.
     zoom                  :
     IntERACT_zoom         :
     organ                 :
@@ -484,6 +523,11 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(keep_bvh_matrix.shape[1]):
         for acquisition in range(keep_bvh_matrix.shape[0]):
             keep_matrix_stacked[slc, bval_high_indicies[acquisition]] = keep_bvh_matrix[acquisition, slc]
+    if manual_review:
+        from cardpy.GUI_Tools.Rejection_Review import review_rejection
+        keep_matrix_stacked = review_rejection(
+            original_matrix_stacked, original_bvals_stacked,
+            original_bvecs_stacked, keep_matrix_stacked)
     if dictionary_input:
         accepted_encodings, stats_by_encoding, keep_by_encoding = _apply_dictionary_keep(
             dictionary_items, keep_matrix_stacked)
@@ -503,95 +547,10 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         accepted_bvecs = np.asarray([encoding['bvec'] for encoding in accepted_encodings.values()])
         return [accepted_encodings, accepted_bvals, accepted_bvecs,
                 Slice_Crop_Coordinates, stats_by_encoding, keep_by_encoding]
-    ########## Identify new matrix dimensions ######################################################################################################
-    numRow                  = original_matrix_stacked.shape[0]                                                                   # Define number of rows (x)
-    numCol                  = original_matrix_stacked.shape[1]                                                                   # Define number of columns (y)
-    numSlc                  = original_matrix_stacked.shape[2]                                                                   # Define number of slices (z)
-    (unique, index, counts) = np.unique(original_bvecs_stacked, return_counts = True, return_index = True, axis = 0)             # Extract number of different diffusion directions
-    unique                  = unique[np.argsort(index)]                                                                 # Retain stacked diffusion direction order
-    numDif                  = len(unique)                                                                               # Define number of diffusion directions
-    numAvg                  = max(counts)                                                                               # Define number of averages
-    keep_matrix_sorted = np.zeros([numSlc, numDif, numAvg])
-    stacked_index_list = []                                                                                        # Initialize stacked index list
-    for dif in range(numDif):                                                                                           # Iterate through diffusion directions
-        idxAvg = -1                                                                                                         # Initialize average index
-        for idx in range(keep_matrix_stacked.shape[1]):                                                                          # Iterate through stacked diffusion dimension
-            current_search = unique[dif]                                                                                        # Define current diffusion direction
-            if np.array_equal(current_search, original_bvecs_stacked[idx, :]) == True:                                                   # Check if current diff dir matches desired diff dir ...
-                idxAvg                                 = idxAvg + 1                                                                 # Index current average
-                idxDif                                 = np.where(np.all(unique == original_bvecs_stacked[idx, :],axis = 1))[0][0]           # Index current diffuion direction
-                keep_matrix_sorted[:, idxDif, idxAvg]  = keep_matrix_stacked[:, idx]                                               # Store sorted matrix from current index of
-    stats = np.zeros([keep_matrix_sorted.shape[0], keep_matrix_sorted.shape[1]])
+    accepted_matrix, stats, keep_matrix_sorted = _apply_sorted_keep(original_matrix, keep_matrix_stacked)
     for slc in range(stats.shape[0]):
-        for dif in range(stats.shape[1]):
-            stats[slc, dif] = (np.sum(keep_matrix_sorted[slc, dif, :]) / keep_matrix_sorted.shape[2]) * 100
-            print('Acceptance rate for slice %i, direction %i: %.1f%%' %(int(slc + 1), int(dif + 1), stats[slc, dif]))
-    accepted_matrix = np.zeros_like(original_matrix)
-    accepted_bvals  = []
-    accepted_bvecs  = []
-    averages = keep_matrix_sorted.shape[2]
-    if keep_matrix_sorted.shape[2] > 1:
-        accepted_bvals  = original_bvals
-        accepted_bvecs  = original_bvecs
-        for slc in range(keep_matrix_sorted.shape[0]):
-            for dif in range(keep_matrix_sorted.shape[1]):
-                all_averages   = np.arange(0, averages)                                                                                                                         # Define indices all averages
-                bad_averages   = np.where((keep_matrix_sorted[slc, dif, :] == 0))[0]                                                                                          # Identify indices of bad averages
-                good_averages  = np.delete(all_averages, bad_averages)                                                                                                          # Identify indices of good averages
-                if good_averages.size == 0:
-                    print('All repetitions were rejected for slice %i, direction %i; retaining the first repetition.' % (slc + 1, dif + 1))
-                    good_averages = np.asarray([0])
-                final_averages = all_averages
-                for idx in range(len(bad_averages)):                                                                                                                            # Iterate through indices of bad averages
-                    replacement_average               = np.random.choice(good_averages, 1)[0]                                                                                          # Select random replacement index from indices of good averages
-                    final_averages[bad_averages[idx]] = replacement_average                                                                                                         # Overwrite bad average index with random replacement average index
-                for avg in range(averages):                                                                                                                                     # Iterate through averages
-                    accepted_matrix[:, :, slc, dif, avg]  = original_matrix[:, :, slc, dif, final_averages[avg]]                    # Overwrite bad average data with replacement average data in accepted matrix
-    else:
-        print('Only 1 average detected.')
-        #print('Output will put each value in a list with each slice nested within the respective list.')
-#        accepted_matrix = []
-#        for slc in range(keep_matrix_sorted.shape[0]):
-#            accepted_bvals.append([])
-#            accepted_bvecs.append([])
-#            matrix_list = []
-#            for dif in range(keep_matrix_sorted.shape[1]):
-#                if keep_matrix_sorted[slc, dif] == 1:
-#                    temp_image = original_matrix[:, :, slc, dif, 0]
-#                    temp_image = temp_image[:, :, np.newaxis]
-#                    matrix_list.append(temp_image)
-#                    accepted_bvals[slc].append(original_bvals[dif])
-#                    accepted_bvecs[slc].append(original_bvecs[dif])
-#                else:
-#
-#                    if dif == 0:
-#                        print('On slice %i, direction %i was rejected, but non-diffusion weighted images cannot be removed.')
-#                        temp_image = original_matrix[:, :, slc, dif, 0]
-#                        temp_image = temp_image[:, :, np.newaxis]
-#                        matrix_list.append(temp_image)
-#                        accepted_bvals[slc].append(original_bvals[dif])
-#                        accepted_bvecs[slc].append(original_bvecs[dif])
-#                    else:
-#                        print('On slice %i, direction %i was rejected and removed from dataset.' %(int(slc), int(dif)))
-#            accepted_matrix.append(np.concatenate(matrix_list, axis = 2))
-        for slc in range(keep_matrix_sorted.shape[0]):
-            for dif in range(keep_matrix_sorted.shape[1]):
-                if keep_matrix_sorted[slc, dif] == 1:
-                    accepted_matrix[:, :, slc, dif, 0] = original_matrix[:, :, slc, dif, 0]
-                else:
-
-                    if dif == 0:
-                        print('On slice %i, direction %i was rejected, but non-diffusion weighted images cannot be removed.')
-                        accepted_matrix[:, :, slc, dif, 0] = original_matrix[:, :, slc, dif, 0]
-                    else:
-                        print('On slice %i, direction %i was rejected and replaced with NaN values.' %(int(slc), int(dif)))
-#                        temp_image    = np.empty([original_matrix.shape[0], original_matrix.shape[1]])
-#                        temp_image[:] = 0
-#                        accepted_matrix[:, :, slc, dif, 0] = temp_image
-                        temp_image        = original_matrix[:, :, slc, dif, 0]
-                        temp_image_max    = temp_image.max()
-                        temp_image_offset = temp_image - temp_image_max
-                        accepted_matrix[:, :, slc, dif, 0] = temp_image_offset
-        accepted_bvals  = original_bvals
-        accepted_bvecs  = original_bvecs
-    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates, stats, keep_matrix_sorted] 
+        for encoding in range(stats.shape[1]):
+            print('Acceptance rate for slice %i, encoding %i: %.1f%%'
+                  % (slc + 1, encoding + 1, stats[slc, encoding]))
+    return [accepted_matrix, original_bvals, original_bvecs,
+            Slice_Crop_Coordinates, stats, keep_matrix_sorted]

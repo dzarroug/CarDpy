@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     ### ---- Shot rejection ----
     "rejection": {
         "enabled":        True,
+        "manual_review":  False,      # review automatic decisions in a clickable image grid
         "nrmse_threshold": 0.75,
         "nssim_threshold": 0.75,
         "zoom":           "ON",
