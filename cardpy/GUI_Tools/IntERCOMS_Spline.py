@@ -7,12 +7,15 @@ from cardpy.Colormaps import cDTI_Colormaps_Generator
 
 cDTI_cmaps = cDTI_Colormaps_Generator()
 
-def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_bounds=None, md_max=3.0, point_size=8.0, return_crop=False):
+def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_bounds=None,
+            md_max=3.0, point_size=8.0, scan_name=None, initial_contours=None):
     if gui_version == 'v2':
         from cardpy.GUI_Tools.IntERCOMS_Spline_v2 import New_GUI as responsive_gui
-        return responsive_gui(avg_diff_image, ADC_image, E1_image, crop_bounds=crop_bounds, md_max=md_max, point_size=point_size, return_crop=return_crop)
-    if return_crop:
-        raise ValueError('return_crop requires gui_version="v2".')
+        return responsive_gui(avg_diff_image, ADC_image, E1_image, crop_bounds=crop_bounds,
+                              md_max=md_max, point_size=point_size, scan_name=scan_name,
+                              initial_contours=initial_contours)
+    if initial_contours is not None:
+        raise ValueError('Saved segmentation review requires gui.version="v2".')
     if gui_version != 'legacy':
         raise ValueError("gui_version must be 'legacy' or 'v2'.")
 
@@ -67,7 +70,7 @@ def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_boun
 
         def __init__(self):
             super().__init__(master=get_root())
-            self.title("CarDpy: Beta GUI")
+            self.title("CarDpy: Beta GUI" + (f" — {scan_name}" if scan_name else ""))
             app_bkg_col    = '#1A2028'    # Dark Blue 1  (Notebook Background)
             app_txt_col    = '#FFEC8E'    # Yellow
             frame_bkg_col1 = '#30394A'    # Dark Blue 2  (Notebook Base 1)

@@ -1,4 +1,4 @@
-from cardpy.GUI_Tools._runtime import create_window, wait_window
+from cardpy.GUI_Tools._runtime import create_window, wait_window, with_scan_name
 
 def IntERVEIW_GUI(original_matrix):
     from   sys                               import platform
@@ -125,7 +125,7 @@ def IntERVEIW_GUI(original_matrix):
     root.geometry(geometry_string)
     root.minsize(int(window_width * 0.5), int(window_height * 0.5))
     root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
-    root.title('INTeractive Enhanced Right Ventricular Insertions Estimate Widget')
+    root.title(with_scan_name('INTeractive Enhanced Right Ventricular Insertions Estimate Widget'))
 
     Image_Label = tk.Label(root, font = MEDIUMFONT,
                            fg = app_txt_col, bg = app_bkg_col)

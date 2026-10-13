@@ -1,4 +1,4 @@
-from cardpy.GUI_Tools._runtime import create_window, wait_window
+from cardpy.GUI_Tools._runtime import create_window, wait_window, with_scan_name
 
 def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_Width = None):
     from   sys                               import platform
@@ -147,7 +147,7 @@ def IntERCOMS_GUI(original_matrix, mean_diffusivity, primary_eigenvector, Line_W
     root.geometry(geometry_string)
     root.minsize(int(window_width * 0.5), int(window_height * 0.5))
     root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
-    root.title('INTeractive Elliptical Region Contouring of Myocardium Software')
+    root.title(with_scan_name('INTeractive Elliptical Region Contouring of Myocardium Software'))
 
 
     Image_Label = tk.Label(root, font = LARGEFONT,

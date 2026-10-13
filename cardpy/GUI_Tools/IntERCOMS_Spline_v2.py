@@ -1,7 +1,7 @@
 """Responsive contouring with synchronized zoom and per-image display controls."""
-import json
 import numpy as np
-from tkinter import ttk, filedialog, messagebox
+import tkinter as tk
+from tkinter import ttk
 from scipy.interpolate import splprep, splev
 from matplotlib.widgets import RectangleSelector
 from cardpy.Colormaps import cDTI_Colormaps_Generator
@@ -25,8 +25,10 @@ class ContourWindow:
     stages = ('epi', 'endo', 'antRVIP', 'infRVIP')
     labels = ('Epicardium', 'Endocardium', 'Anterior RV insertion', 'Inferior RV insertion')
     colors = ('#61ba86', '#ef7070', '#54d5ef', '#d17ef0')
+    active_button_colors = ('#26734d', '#b63842', '#08788a', '#70469a')
 
-    def __init__(self, magnitude, MD, E1, bounds=None, md_max=3.0, point_size=8.0):
+    def __init__(self, magnitude, MD, E1, bounds=None, md_max=3.0, point_size=8.0,
+                 scan_name=None, initial_contours=None):
         magnitude, MD, E1 = np.asarray(magnitude), np.asarray(MD), np.asarray(E1)
         if magnitude.ndim != 2 or MD.shape != magnitude.shape or E1.shape != magnitude.shape + (3,):
             raise ValueError('Contouring requires matching magnitude / MD images and an E1 image with three components.')
@@ -39,6 +41,8 @@ class ContourWindow:
         self.points = {stage: [] for stage in self.stages}
         self.confirmed = {stage: False for stage in self.stages}
         self.contours = {}
+        if initial_contours is not None:
+            self.load_contours(initial_contours)
         self.stage = 'epi'
         self.result = None
         self.zoom_mode = False
@@ -46,9 +50,10 @@ class ContourWindow:
         self.history = []
         self.pending_layout = None
         self.wide = None
-        self.window = create_window('CarDpy: Contouring v2')
-        ttk.Style(self.window).configure('CardpyV2.TButton',
-                                         font=('Verdana', 12), padding=(10, 6))
+        title = 'CarDpy: Contouring v2'
+        if scan_name:
+            title += f' — {scan_name}'
+        self.window = create_window(title)
         size_window(self.window)
         self.window.protocol('WM_DELETE_WINDOW', self.cancel)
         self.window.columnconfigure(0, weight=1)
@@ -57,15 +62,21 @@ class ContourWindow:
         toolbar.grid(row=0, column=0, sticky='ew')
         self.stage_buttons = []
         for column, (stage, label) in enumerate(zip(self.stages, self.labels)):
-            button = ttk.Button(toolbar, style='CardpyV2.TButton', text=label, command=lambda s=stage: self.edit(s))
-            button.grid(row=0, column=column, padx=3, pady=3, sticky='ew')
-            self.stage_buttons.append(button)
+            button_frame = tk.Frame(toolbar, background='#514c59', bd=2,
+                                    relief='raised', cursor='hand2')
+            button = tk.Label(button_frame, text=label, background='#514c59',
+                              foreground='white', padx=10, pady=9,
+                              font=('Verdana', 10, 'bold'), cursor='hand2')
+            button.pack(fill='both', expand=True)
+            for widget in (button_frame, button):
+                widget.bind('<Button-1>', lambda event, s=stage: self.edit(s))
+            button_frame.grid(row=0, column=column, padx=3, pady=3, sticky='ew')
+            self.stage_buttons.append((button_frame, button))
             toolbar.columnconfigure(column, weight=1)
-        ttk.Style(self.window).configure('CardpyConfirm.TButton', font=('Verdana', 13, 'bold'), padding=(14, 12))
+        ttk.Style(self.window).configure('CardpyConfirm.TButton', font=('Verdana', 12, 'bold'), padding=(12, 10))
         self.confirm_button = ttk.Button(toolbar, command=self.confirm, style='CardpyConfirm.TButton')
         self.confirm_button.grid(row=1, column=0, columnspan=2, padx=3, pady=6, sticky='ew')
-        ttk.Button(toolbar, style='CardpyV2.TButton', text='Undo edit (d)', command=self.undo).grid(row=1, column=2, padx=3, pady=3, sticky='ew')
-        ttk.Button(toolbar, style='CardpyV2.TButton', text='Draw zoom box', command=self.start_zoom).grid(row=1, column=3, padx=3, pady=3, sticky='ew')
+        ttk.Button(toolbar, text='Undo edit (d)', command=self.undo).grid(row=1, column=2, padx=3, pady=3, sticky='ew')
         point_controls = ttk.Frame(toolbar)
         point_controls.grid(row=2, column=0, columnspan=4, pady=3)
         ttk.Label(point_controls, text='Point size').pack(side='left', padx=6)
@@ -99,21 +110,41 @@ class ContourWindow:
         self.zoom_selector.set_active(False)
         footer = ttk.Frame(self.window, padding=8)
         footer.grid(row=3, column=0, sticky='ew')
-        ttk.Button(footer, style='CardpyV2.TButton', text='Cancel', command=self.cancel).pack(side='left')
-        ttk.Button(footer, style='CardpyV2.TButton', text='Full image', command=lambda: self.set_zoom(None)).pack(side='left', padx=6)
-        ttk.Button(footer, style='CardpyV2.TButton', text='Reset to crop', command=lambda: self.set_zoom(self.initial_crop)).pack(side='left', padx=6)
-        ttk.Button(footer, style='CardpyV2.TButton', text='Save crop', command=self.save_crop).pack(side='left', padx=6)
+        ttk.Button(footer, text='Cancel', command=self.cancel).pack(side='left')
+        ttk.Button(footer, text='Full image', command=lambda: self.set_zoom(None)).pack(side='left', padx=6)
+        ttk.Button(footer, text='Reset to crop', command=lambda: self.set_zoom(self.initial_crop)).pack(side='left', padx=6)
+        ttk.Button(footer, text='Draw zoom box', command=self.start_zoom).pack(side='left', padx=6)
         self.panel_choice = ttk.Combobox(footer, state='readonly', width=23,
                                        values=('Magnitude', 'MD', 'Primary eigenvector'))
         self.panel_choice.current(0)
         self.panel_choice.bind('<<ComboboxSelected>>', lambda event: self.layout())
-        self.finish_button = ttk.Button(footer, style='CardpyV2.TButton', text='Save contours & Finish', command=self.finish, state='disabled')
+        self.finish_button = ttk.Button(footer, text='Confirm segmentation & Finish' if initial_contours is not None else 'Save contours & Finish', command=self.finish, state='disabled')
         self.finish_button.pack(side='right')
         self.window.bind('<Configure>', self.resize)
         self.window.bind('<ButtonRelease-1>', self.release_point, add='+')
         self.set_zoom(self.initial_crop)
         self.layout()
-        self.update_status()
+        self.draw_points()
+        self.update_status('Saved segmentation loaded. Check alignment, drag points to adjust, or select Confirm segmentation & Finish.' if initial_contours is not None else None)
+
+    def load_contours(self, initial_contours):
+        """Keep exact saved curves; show a manageable number of edit handles."""
+        for stage in self.stages:
+            points = np.asarray(initial_contours[stage], dtype=float)
+            minimum = 4 if stage in ('epi', 'endo') else 1
+            if points.ndim != 2 or points.shape[1] != 2 or len(points) < minimum or not np.isfinite(points).all():
+                raise ValueError(f'Invalid saved {stage} coordinates.')
+            if stage in ('epi', 'endo'):
+                self.contours[stage] = points.copy()
+                handles = points[:-1] if np.allclose(points[0], points[-1]) else points
+                if len(handles) < 4:
+                    raise ValueError(f'Saved {stage} must contain four distinct contour points.')
+                indices = np.linspace(0, len(handles), min(20, len(handles)), endpoint=False, dtype=int)
+                self.points[stage] = [tuple(point) for point in handles[indices]]
+            else:
+                if len(points) != 1:
+                    raise ValueError(f'Saved {stage} must contain exactly one insertion point.')
+                self.points[stage] = [tuple(points[0])]
 
     def change_point_size(self, event=None):
         try:
@@ -151,35 +182,43 @@ class ContourWindow:
     def update_status(self, message=None):
         label = self.labels[self.stages.index(self.stage)]
         count = len(self.points[self.stage])
-        for button, stage, name in zip(self.stage_buttons, self.stages, self.labels):
+        for (button_frame, button), stage, name in zip(self.stage_buttons, self.stages, self.labels):
             marker = '▶ ' if stage == self.stage else ('✓ ' if self.confirmed[stage] else '')
-            button.configure(text=marker + name)
+            active = stage == self.stage
+            color = self.active_button_colors[self.stages.index(stage)] if active else '#514c59'
+            button_frame.configure(background=color, relief='sunken' if active else 'raised',
+                                   bd=3 if active else 2)
+            button.configure(text=marker + name, background=color,
+                             foreground='white' if active else '#f4f1f7')
         self.confirm_button.configure(text='Confirm ' + label)
         text = message or f'{label}: {count} point(s). Drag points to move; click to add. Confirm when ready.'
         self.status.configure(text=text)
-        complete = all(self.confirmed.values())
+        complete = self.has_complete_contours()
         self.finish_button.configure(state='normal' if complete else 'disabled')
+
+    def has_complete_contours(self):
+        return (len(self.points['epi']) >= 4 and len(self.points['endo']) >= 4
+                and bool(self.points['antRVIP']) and bool(self.points['infRVIP']))
 
     def edit(self, stage):
         self.dragging = None
         self.zoom_mode = False
         self.zoom_selector.set_active(False)
         self.stage = stage
-        self.confirmed[stage] = False
-        self.contours.pop(stage, None)
         self.draw_points()
         self.update_status()
 
     def remember(self):
-        self.history.append((self.stage, self.points[self.stage].copy()))
+        self.history.append((self.stage, self.points[self.stage].copy(),
+                             self.contours.get(self.stage), self.confirmed[self.stage]))
+        self.confirmed[self.stage] = False
+        self.contours.pop(self.stage, None)
 
     def nearest_point(self, event):
         if not hasattr(event, 'x') or not hasattr(event, 'y'):
             return None
         nearest, distance = None, max(10.0, self.point_size * event.inaxes.figure.dpi / 144 + 3)
         for stage in self.stages:
-            if stage != self.stage and not all(self.confirmed.values()):
-                continue
             for index, point in enumerate(self.points[stage]):
                 pixel = event.inaxes.transData.transform(point)
                 delta = np.linalg.norm(pixel - [event.x, event.y])
@@ -233,8 +272,12 @@ class ContourWindow:
 
     def undo(self):
         if self.history:
-            stage, points = self.history.pop()
+            stage, points, contour, confirmed = self.history.pop()
             self.edit(stage)
+            self.confirmed[stage] = confirmed
+            self.contours.pop(stage, None)
+            if contour is not None:
+                self.contours[stage] = contour
             self.points[stage] = points
             self.dragging = None
             self.draw_points()
@@ -254,17 +297,16 @@ class ContourWindow:
             return
         try:
             if self.stage in ('epi', 'endo'):
-                self.contours[self.stage] = self.fit_contour(self.stage)
+                if self.stage not in self.contours:
+                    self.contours[self.stage] = self.fit_contour(self.stage)
             elif not self.points[self.stage]:
                 raise ValueError('Pick the RV insertion point before confirming.')
         except (ValueError, TypeError):
             self.update_status('Pick at least four distinct contour points, or one RV insertion point.')
             return
         self.confirmed[self.stage] = True
-        if self.stage != self.stages[-1]:
-            self.stage = self.stages[self.stages.index(self.stage) + 1]
         self.draw_points()
-        self.update_status('All stages confirmed. Save contours or select a stage to edit.' if all(self.confirmed.values()) else None)
+        self.update_status('Stage saved. Select any contour or insertion point to continue editing.')
 
     def draw_points(self):
         for index, panel in enumerate(self.panels):
@@ -308,26 +350,20 @@ class ContourWindow:
         for panel in self.panels:
             panel.set_zoom(self.current_crop)
 
-    def save_crop(self):
-        path = filedialog.asksaveasfilename(
-            parent=self.window, title='Save display crop', defaultextension='.json',
-            initialfile='Display_Crop.json', filetypes=[('JSON', '*.json')])
-        if not path:
+    def finish(self):
+        if not self.has_complete_contours():
+            self.update_status('Draw both contours and place both RV insertion points before finishing.')
             return
         try:
-            with open(path, 'w') as handle:
-                json.dump({'image_shape': list(self.shape),
-                           'crop_bounds': list(self.current_crop)}, handle, indent=2)
-        except OSError as error:
-            messagebox.showerror('Save crop failed', str(error), parent=self.window)
+            endo = self.contours.get('endo')
+            epi = self.contours.get('epi')
+            if endo is None:
+                endo = self.fit_contour('endo')
+            if epi is None:
+                epi = self.fit_contour('epi')
+        except (ValueError, TypeError):
+            self.update_status('Pick at least four distinct points on each contour before finishing.')
             return
-        self.update_status('Display crop saved. Bounds are [x_start, x_end, y_start, y_end] in image pixels.')
-
-    def finish(self):
-        if not all(self.confirmed.values()):
-            self.update_status('Confirm both contours and both RV insertion points before finishing.')
-            return
-        endo, epi = self.contours['endo'], self.contours['epi']
         self.result = [endo[:, 0].tolist(), endo[:, 1].tolist(),
                        epi[:, 0].tolist(), epi[:, 1].tolist(),
                        self.points['antRVIP'][-1], self.points['infRVIP'][-1]]
@@ -346,9 +382,12 @@ class ContourWindow:
         self.close()
 
 
-def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=3.0, point_size=8.0, return_crop=False):
-    app = ContourWindow(avg_diff_image, ADC_image, E1_image, bounds=crop_bounds, md_max=md_max, point_size=point_size)
+def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=3.0,
+            point_size=8.0, scan_name=None, initial_contours=None):
+    app = ContourWindow(avg_diff_image, ADC_image, E1_image, bounds=crop_bounds,
+                        md_max=md_max, point_size=point_size, scan_name=scan_name,
+                        initial_contours=initial_contours)
     wait_window(app.window)
     if app.result is None:
         raise RuntimeError('Contour selection cancelled.')
-    return (app.result, app.current_crop.copy()) if return_crop else app.result
+    return app.result

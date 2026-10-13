@@ -12,8 +12,11 @@ DEFAULT_CONFIG = {
 
     ### ---- Interactive tools ----
     "gui": {
+        "saved_configuration_mode": "off",  # off / reuse (no saved GUIs) / review (prefill GUIs)
         "point_size":        8.0,       # v2 marker diameter, in display points (3–20)
         "version":           "legacy",  # "legacy" / "v2" (box crop + responsive contouring)
+        "segmentation_review": True,   # show saved contours for confirmation/editing (v2)
+        "reuse_existing_segmentation": False,  # discover this output folder's saved JSON
         "segmentation_zoom": True,      # v2: reuse the rejection crop for contouring
         "md_max":            3.0,       # v2 display maximum, in µm^2/ms
     },
@@ -26,7 +29,6 @@ DEFAULT_CONFIG = {
     ### ---- Shot rejection ----
     "rejection": {
         "enabled":        True,
-        "manual_review":  False,      # review automatic decisions in a clickable image grid
         "nrmse_threshold": 0.75,
         "nssim_threshold": 0.75,
         "zoom":           "ON",
@@ -98,6 +100,7 @@ DEFAULT_CONFIG = {
 
     ### ---- Output ---
     "output": {
+        "directory": None,  # None uses study_root/CarDpy_Output.
         "save_diagnostics": True,  
     },
 }

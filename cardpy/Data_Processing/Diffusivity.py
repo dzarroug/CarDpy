@@ -50,8 +50,9 @@ def ADC_Filter(original_matrix, original_bvals=None, original_bvecs=None,
             with np.errstate(divide='ignore', invalid='ignore'):
                 adc = -1000.0 * np.log(np.abs(image) / reference[..., None]) / (bval - low)
             rejected = adc >= max_diffusivity
-            all_rejected = np.all(rejected, axis=3)
-            best = np.argmin(np.where(np.isnan(adc), np.inf, adc), axis=3)
+            available = np.isfinite(image)
+            all_rejected = np.all(rejected | ~available, axis=3) & np.any(available, axis=3)
+            best = np.argmin(np.where(available & ~np.isnan(adc), adc, np.inf), axis=3)
             # Unreject the best shot only where all shots were rejected.
             best_mask = np.arange(image.shape[3]) == best[..., None]
             rejected &= ~(all_rejected[..., None] & best_mask)

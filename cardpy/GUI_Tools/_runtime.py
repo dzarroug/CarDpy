@@ -5,8 +5,23 @@ not the interpreter, between tools or notebook runs.
 """
 import threading
 import tkinter as tk
+from tkinter import ttk
 
 _root = None
+_scan_name = None
+
+
+def set_scan_name(scan_name):
+    """Set the scan label applied to subsequent CarDpy GUI windows."""
+    global _scan_name
+    _scan_name = str(scan_name).strip() if scan_name else None
+
+
+def with_scan_name(title):
+    title = str(title)
+    if _scan_name and _scan_name not in title:
+        return f'{title} — {_scan_name}'
+    return title
 
 
 def get_root():
@@ -25,7 +40,9 @@ def get_root():
 
 def create_window(title):
     window = tk.Toplevel(master=get_root())
-    window.title(title)
+    window.title(with_scan_name(title))
+    # Give controls a slightly larger hit target across all CardPy windows.
+    ttk.Style(window).configure("TButton", padding=(14, 10))
     return window
 
 

@@ -65,7 +65,7 @@ def stacked2dictionary(stacked_matrix, stacked_bvals, stacked_bvecs, decimals=5)
     return encodings
 
 
-def dictionary2sorted(encodings, mode='strict', operation_type='Magnitude'):
+def dictionary2sorted(encodings, mode='strict', operation_type='Magnitude', *, phase_corrected=False):
     """Convert an encoding dictionary to CarDpy's 5D sorted representation.
 
     ``strict`` preserves repetitions and requires equal counts. ``average`` uses
@@ -81,7 +81,7 @@ def dictionary2sorted(encodings, mode='strict', operation_type='Magnitude'):
 
     if mode == 'average':
         from cardpy.Data_Processing.Averaging import average
-        encodings, _, _ = average(encodings, operation_type=operation_type)
+        encodings, _, _ = average(encodings, operation_type=operation_type, phase_corrected=phase_corrected)
 
     if mode == 'individual':
         matrix, bvals, bvecs = dictionary2stacked(encodings)

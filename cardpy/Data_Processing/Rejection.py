@@ -2,24 +2,13 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
     """Map stacked rejection decisions back to variable-length encodings."""
     import numpy as np
 
-    dictionary_items = list(dictionary_items)
-    keep_matrix_stacked = np.asarray(keep_matrix_stacked)
-    if (keep_matrix_stacked.ndim != 2
-            or keep_matrix_stacked.shape[1] != sum(item[2] for item in dictionary_items)
-            or not np.isin(keep_matrix_stacked, [0, 1]).all()):
-        raise ValueError('Binary rejection decisions must match the dictionary images.')
-    for _, encoding, repetitions in dictionary_items:
-        images = np.asarray(encoding['images'])
-        if (images.ndim != 4 or images.shape[2:] != (keep_matrix_stacked.shape[0], repetitions)
-                or repetitions == 0):
-            raise ValueError('Dictionary images must match the decision slices and repetitions.')
     accepted_encodings = {}
     stats_by_encoding = {}
     keep_by_encoding = {}
     offset = 0
     for key, encoding, repetitions in dictionary_items:
         encoding_keep = keep_matrix_stacked[:, offset:offset + repetitions].copy()
-        accepted_images = np.asarray(encoding['images']).copy()
+        accepted_images = np.array(encoding['images'], dtype=np.complex128 if np.iscomplexobj(encoding['images']) else float, copy=True)
         stats_by_encoding[key] = np.mean(encoding_keep, axis=1) * 100
         keep_by_encoding[key] = encoding_keep
         for slc in range(encoding_keep.shape[0]):
@@ -27,11 +16,11 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
             bad = np.flatnonzero(encoding_keep[slc] == 0)
             if bad.size == 0:
                 continue
+            # Preserve one fallback shot when everything was rejected. Otherwise
+            # mark rejected repetitions missing so each survivor counts once.
             if good.size == 0:
-                good = np.asarray([0])
-            for rejected in bad:
-                replacement = int(np.random.choice(good, 1)[0])
-                accepted_images[:, :, slc, rejected] = accepted_images[:, :, slc, replacement]
+                bad = bad[bad != 0]
+            accepted_images[:, :, slc, bad] = np.nan
         accepted_encodings[key] = {
             'bval': float(encoding['bval']),
             'bvec': np.asarray(encoding['bvec']).copy(),
@@ -42,41 +31,28 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
         raise ValueError('Dictionary repetitions do not match the stacked rejection decisions.')
     return accepted_encodings, stats_by_encoding, keep_by_encoding
 
-def _apply_sorted_keep(matrix, keep_matrix_stacked):
-    """Undo repetition-major stacking without regrouping diffusion encodings."""
+
+def _apply_sorted_keep(matrix, keep):
+    """Keep each accepted repetition once, with repetition 0 as fallback."""
     import numpy as np
-
-    matrix = np.asarray(matrix)
-    keep = np.asarray(keep_matrix_stacked)
-    if matrix.ndim != 5 or any(size == 0 for size in matrix.shape):
-        raise ValueError('Sorted images must be a nonempty 5D array.')
-    expected = (matrix.shape[2], matrix.shape[3] * matrix.shape[4])
-    if keep.shape != expected or not np.isin(keep, [0, 1]).all():
-        raise ValueError('Binary rejection decisions must match the sorted images.')
-    keep_sorted = keep.reshape(matrix.shape[2], matrix.shape[4], matrix.shape[3]).swapaxes(1, 2).copy()
-    accepted = matrix.copy()
-    for slc in range(matrix.shape[2]):
-        for encoding in range(matrix.shape[3]):
-            good = np.flatnonzero(keep_sorted[slc, encoding] == 1)
-            bad = np.flatnonzero(keep_sorted[slc, encoding] == 0)
-            if good.size == 0:
-                print('All repetitions were rejected for slice %i, encoding %i; retaining repetition 0.'
-                      % (slc + 1, encoding + 1))
-                good = np.asarray([0])
-            for repetition in bad:
-                replacement = int(np.random.choice(good, 1)[0])
-                accepted[:, :, slc, encoding, repetition] = matrix[:, :, slc, encoding, replacement]
-    return accepted, np.mean(keep_sorted, axis=2) * 100, keep_sorted
+    accepted = np.array(matrix, dtype=np.complex128 if np.iscomplexobj(matrix) else float, copy=True)
+    if keep.shape != matrix.shape[2:]:
+        raise ValueError('Rejection decisions must match slices, encodings, and repetitions.')
+    for slc, dif in np.ndindex(keep.shape[:2]):
+        bad = np.flatnonzero(keep[slc, dif] == 0)
+        if not np.any(keep[slc, dif]):
+            print('All repetitions were rejected for slice %i, direction %i; retaining repetition 0.' % (slc + 1, dif + 1))
+            bad = bad[bad != 0]
+        accepted[:, :, slc, dif, bad] = np.nan
+    return accepted
 
 
-def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False):
+def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off"):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
     original_bvals        : Sorted b-values.
     original_bvecs        : Sorted b vectors.
-    manual_review         : Open an optional image grid to edit automatic keep/reject decisions.
-                            Closing or cancelling the review aborts rejection.
     zoom                  :
     IntERACT_zoom         :
     organ                 :
@@ -199,6 +175,29 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         if accepted_matrix is not None:
             accepted_matrix  = accepted_matrix.astype(np.float64)                                                                           # Cast accepted matrix for magnitude data
         temporary_matrix = original_matrix_stacked                                                                                              # Create temporary matrix variable
+    if saved_configuration_mode not in ('off', 'reuse', 'review'):
+        raise ValueError('saved_configuration_mode must be off, reuse, or review.')
+    previous = None
+    if saved_configuration_mode != 'off':
+        previous = _load_rejection_configuration(
+            _diag_dir, original_matrix_stacked, original_bvals_stacked,
+            original_bvecs_stacked, operation_type)
+    if previous is not None:
+        coordinates, automatic_keep, final_keep = previous
+        if saved_configuration_mode == 'review':
+            coordinates = INTERACT_GUI(original_matrix_stacked, organ, gui_version=gui_version,
+                                       initial_coordinates=coordinates)
+            final_keep = _manual_rejection_review(
+                original_matrix_stacked, automatic_keep, initial_keep=final_keep,
+                diagnostics_path=diagnostics_path, bvals=original_bvals_stacked,
+                bvecs=original_bvecs_stacked, save_decisions=save_diagnostics)
+        if save_diagnostics:
+            _save_rejection_configuration(_diag_dir, original_matrix_stacked,
+                                          original_bvals_stacked, original_bvecs_stacked,
+                                          coordinates, automatic_keep, final_keep, operation_type)
+        return _rejection_result(original_matrix, original_bvals, original_bvecs,
+                                 dictionary_items, original_bvecs_stacked,
+                                 coordinates, final_keep, operation_type)
     ########## ROI Cropping for Image #############################################################################################################
     slices                 = original_matrix_stacked.shape[2]                                                                      #
     Slice_Crop_Coordinates = []                                                                                             #
@@ -523,11 +522,27 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
     for slc in range(keep_bvh_matrix.shape[1]):
         for acquisition in range(keep_bvh_matrix.shape[0]):
             keep_matrix_stacked[slc, bval_high_indicies[acquisition]] = keep_bvh_matrix[acquisition, slc]
+    automatic_keep = keep_matrix_stacked.copy()
     if manual_review:
-        from cardpy.GUI_Tools.Rejection_Review import review_rejection
-        keep_matrix_stacked = review_rejection(
-            original_matrix_stacked, original_bvals_stacked,
-            original_bvecs_stacked, keep_matrix_stacked)
+        keep_matrix_stacked = _manual_rejection_review(
+            original_matrix_stacked, keep_matrix_stacked, diagnostics_path=diagnostics_path,
+            bvals=original_bvals_stacked, bvecs=original_bvecs_stacked,
+            save_decisions=save_diagnostics)
+    if save_diagnostics:
+        _save_rejection_configuration(_diag_dir, original_matrix_stacked,
+                                      original_bvals_stacked, original_bvecs_stacked,
+                                      Slice_Crop_Coordinates, automatic_keep,
+                                      keep_matrix_stacked, operation_type)
+    return _rejection_result(original_matrix, original_bvals, original_bvecs,
+                             dictionary_items, original_bvecs_stacked,
+                             Slice_Crop_Coordinates, keep_matrix_stacked, operation_type)
+
+
+def _rejection_result(original_matrix, original_bvals, original_bvecs, dictionary_items,
+                      original_bvecs_stacked, Slice_Crop_Coordinates,
+                      keep_matrix_stacked, operation_type):
+    import numpy as np
+    dictionary_input = isinstance(original_matrix, dict)
     if dictionary_input:
         accepted_encodings, stats_by_encoding, keep_by_encoding = _apply_dictionary_keep(
             dictionary_items, keep_matrix_stacked)
@@ -547,10 +562,325 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         accepted_bvecs = np.asarray([encoding['bvec'] for encoding in accepted_encodings.values()])
         return [accepted_encodings, accepted_bvals, accepted_bvecs,
                 Slice_Crop_Coordinates, stats_by_encoding, keep_by_encoding]
-    accepted_matrix, stats, keep_matrix_sorted = _apply_sorted_keep(original_matrix, keep_matrix_stacked)
+    ########## Identify new matrix dimensions ######################################################################################################
+    numRow                  = original_matrix.shape[0]                                                                   # Define number of rows (x)
+    numCol                  = original_matrix.shape[1]                                                                   # Define number of columns (y)
+    numSlc                  = keep_matrix_stacked.shape[0]                                                                   # Define number of slices (z)
+    (unique, index, counts) = np.unique(original_bvecs_stacked, return_counts = True, return_index = True, axis = 0)             # Extract number of different diffusion directions
+    unique                  = unique[np.argsort(index)]                                                                 # Retain stacked diffusion direction order
+    numDif                  = len(unique)                                                                               # Define number of diffusion directions
+    numAvg                  = max(counts)                                                                               # Define number of averages
+    keep_matrix_sorted = np.zeros([numSlc, numDif, numAvg])
+    stacked_index_list = []                                                                                        # Initialize stacked index list
+    for dif in range(numDif):                                                                                           # Iterate through diffusion directions
+        idxAvg = -1                                                                                                         # Initialize average index
+        for idx in range(keep_matrix_stacked.shape[1]):                                                                          # Iterate through stacked diffusion dimension
+            current_search = unique[dif]                                                                                        # Define current diffusion direction
+            if np.array_equal(current_search, original_bvecs_stacked[idx, :]) == True:                                                   # Check if current diff dir matches desired diff dir ...
+                idxAvg                                 = idxAvg + 1                                                                 # Index current average
+                idxDif                                 = np.where(np.all(unique == original_bvecs_stacked[idx, :],axis = 1))[0][0]           # Index current diffuion direction
+                keep_matrix_sorted[:, idxDif, idxAvg]  = keep_matrix_stacked[:, idx]                                               # Store sorted matrix from current index of
+    stats = np.zeros([keep_matrix_sorted.shape[0], keep_matrix_sorted.shape[1]])
     for slc in range(stats.shape[0]):
-        for encoding in range(stats.shape[1]):
-            print('Acceptance rate for slice %i, encoding %i: %.1f%%'
-                  % (slc + 1, encoding + 1, stats[slc, encoding]))
-    return [accepted_matrix, original_bvals, original_bvecs,
-            Slice_Crop_Coordinates, stats, keep_matrix_sorted]
+        for dif in range(stats.shape[1]):
+            stats[slc, dif] = (np.sum(keep_matrix_sorted[slc, dif, :]) / keep_matrix_sorted.shape[2]) * 100
+            print('Acceptance rate for slice %i, direction %i: %.1f%%' %(int(slc + 1), int(dif + 1), stats[slc, dif]))
+    accepted_matrix = _apply_sorted_keep(original_matrix, keep_matrix_sorted)
+    accepted_bvals = original_bvals
+    accepted_bvecs = original_bvecs
+    return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates, stats, keep_matrix_sorted]
+
+
+def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
+                             bvecs=None, save_decisions=True, initial_keep=None):
+    """Open a native Tk window for each slice; click a tile to toggle its decision."""
+    import base64
+    import math
+    import json
+    import os
+    import struct
+    import zlib
+    import numpy as np
+    import tkinter as tk
+    from tkinter import ttk
+    from cardpy.GUI_Tools._runtime import create_window, wait_window
+
+    automatic_keep = np.asarray(keep, dtype=np.uint8).copy()
+    keep = automatic_keep.copy() if initial_keep is None else np.asarray(initial_keep, dtype=np.uint8).copy()
+    n_slices, n_images = keep.shape
+    columns = min(6, max(1, n_images))
+    for slc in range(n_slices):
+        window = create_window(f'CarDpy: Manual shot rejection — slice {slc + 1}/{n_slices}')
+        window.geometry('1120x820')
+        window.minsize(720, 500)
+        window.columnconfigure(0, weight=1)
+        window.columnconfigure(1, weight=0)
+        window.rowconfigure(2, weight=1)
+        ttk.Label(window, text=f'Slice {slc + 1}: click an image to toggle keep/reject',
+                  font=('Verdana', 12, 'bold'), anchor='center').grid(
+                      row=0, column=0, sticky='ew', padx=10, pady=8)
+
+        zoom_bar = ttk.Frame(window, padding=(10, 0, 10, 6))
+        zoom_bar.grid(row=1, column=0, sticky='ew')
+        ttk.Label(zoom_bar, text='Global zoom').pack(side='left', padx=(0, 8))
+        zoom_value = tk.DoubleVar(value=1.0)
+        zoom_label = ttk.Label(zoom_bar, text='100%', width=6, anchor='e')
+        zoom_label.pack(side='right', padx=(8, 0))
+        zoom_scale = ttk.Scale(zoom_bar, from_=1.0, to=4.0, variable=zoom_value,
+                               orient='horizontal', length=300)
+        zoom_scale.pack(side='right')
+
+        container = ttk.Frame(window)
+        container.grid(row=2, column=0, sticky='nsew', padx=8)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.grid(row=0, column=0, sticky='nsew')
+        scrollbar.grid(row=0, column=1, sticky='ns')
+
+        intensity_panel = ttk.Frame(window, padding=(4, 12, 10, 12))
+        intensity_panel.grid(row=2, column=1, sticky='ns')
+        for column_index in range(2):
+            intensity_panel.columnconfigure(column_index, weight=1)
+        ttk.Label(intensity_panel, text='Intensity\n0 → Vmax').grid(
+            row=0, column=0, pady=(0, 6))
+        ttk.Label(intensity_panel, text='Vmax').grid(row=0, column=1, pady=(0, 6))
+        colorbar = tk.Canvas(intensity_panel, width=44, height=260, highlightthickness=0,
+                            cursor='hand2')
+        colorbar.grid(row=1, column=0, sticky='ns', padx=(4, 8))
+        tiles = ttk.Frame(canvas)
+        canvas_window = canvas.create_window((0, 0), window=tiles, anchor='nw')
+        tiles.bind('<Configure>', lambda event: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda event: canvas.itemconfigure(canvas_window, width=event.width))
+        def scroll_canvas(event):
+            step = int(-event.delta / 120) or (-1 if event.delta > 0 else 1)
+            canvas.yview_scroll(step, 'units')
+        window.bind_all('<MouseWheel>', scroll_canvas)
+
+        image_refs = [None] * n_images
+        magnitude_images = []
+        tile_widgets = []
+        for index in range(n_images):
+            magnitude = np.abs(images[:, :, slc, index])
+            magnitude_images.append(np.asarray(magnitude, dtype=np.float32))
+            tile = tk.Frame(tiles, borderwidth=5, relief='solid', padx=3, pady=3)
+            tile.grid(row=index // columns, column=index % columns, padx=5, pady=5, sticky='n')
+            picture = tk.Label(tile, cursor='hand2')
+            picture.pack()
+            status = tk.Label(tile, font=('Verdana', 9, 'bold'), cursor='hand2')
+            status.pack(fill='x')
+            tile_widgets.append((tile, picture, status, index))
+
+        finite_values = [im[np.isfinite(im)] for im in magnitude_images if np.isfinite(im).any()]
+        finite_values = np.concatenate(finite_values) if finite_values else np.asarray([0.0, 1.0])
+        intensity_max = float(np.percentile(finite_values, 99.5))
+        data_max = float(np.max(finite_values))
+        if not np.isfinite(intensity_max) or intensity_max <= 0:
+            intensity_max = max(data_max, 1.0)
+        if not np.isfinite(data_max) or data_max <= 0:
+            data_max = intensity_max
+        # Keep the initial display robust to outliers while allowing Vmax to
+        # extend well above every pixel in the current slice.
+        vmax_control_max = max(data_max * 2.0, intensity_max * 4.0, 1.0)
+        maximum_value = tk.DoubleVar(value=intensity_max)
+        maximum_scale = tk.Scale(intensity_panel, from_=vmax_control_max, to=0.0,
+                                 variable=maximum_value, orient='vertical', length=260,
+                                 width=26, sliderlength=30, showvalue=False,
+                                 resolution=max(vmax_control_max / 500, 1e-6),
+                                 highlightthickness=0, bd=0, troughcolor='#666666')
+        maximum_scale.grid(row=1, column=1, sticky='ns')
+        minimum_text = ttk.Label(intensity_panel, text='0', width=8, anchor='center')
+        maximum_text = ttk.Label(intensity_panel, text=f'{intensity_max:.3g}', width=8, anchor='center')
+        minimum_text.grid(row=2, column=0, pady=(6, 0))
+        maximum_text.grid(row=2, column=1, pady=(6, 0))
+
+        def draw_colorbar():
+            colorbar.delete('all')
+            height = int(colorbar.cget('height'))
+            width = int(colorbar.cget('width'))
+            for y in range(height):
+                gray = round(255 * (1 - y / max(1, height - 1)))
+                colorbar.create_line(0, y, width, y, fill=f'#{gray:02x}{gray:02x}{gray:02x}')
+            colorbar.create_line(0, 0, width, 0, fill='#ffca28', width=3)
+            colorbar.create_line(0, height - 1, width, height - 1,
+                                fill='#e53935', width=3)
+
+        def update_intensity(value):
+            high = min(vmax_control_max, max(float(value), np.finfo(float).eps))
+            maximum_value.set(high)
+            maximum_text.configure(text=f'{high:.3g}')
+            draw_colorbar()
+            refresh_tiles()
+
+        maximum_scale.configure(command=update_intensity)
+
+        def set_vmax_from_colorbar(event):
+            fraction = 1.0 - min(1.0, max(0.0, event.y / max(1, int(colorbar.cget('height')) - 1)))
+            value = fraction * vmax_control_max
+            maximum_scale.set(value)
+            update_intensity(value)
+
+        # The color bar itself is an easy, wide click-and-drag target; the
+        # adjacent native Scale remains available for precise adjustment.
+        colorbar.bind('<Button-1>', set_vmax_from_colorbar)
+        colorbar.bind('<B1-Motion>', set_vmax_from_colorbar)
+
+        def png_photo(gray):
+            out_h, out_w = gray.shape
+            rgb = np.repeat(gray[:, :, None], 3, axis=2)
+            raw_png = b''.join(b'\x00' + row.tobytes() for row in rgb)
+            def png_chunk(kind, payload):
+                body = kind + payload
+                return struct.pack('>I', len(payload)) + body + struct.pack('>I', zlib.crc32(body) & 0xffffffff)
+            png = (b'\x89PNG\r\n\x1a\n'
+                   + png_chunk(b'IHDR', struct.pack('>IIBBBBB', out_w, out_h, 8, 2, 0, 0, 0))
+                   + png_chunk(b'IDAT', zlib.compress(raw_png))
+                   + png_chunk(b'IEND', b''))
+            return tk.PhotoImage(data=base64.b64encode(png).decode('ascii'), format='png')
+
+        def refresh_tiles(value=None):
+            zoom = float(zoom_value.get())
+            zoom_label.configure(text=f'{zoom:.0%}')
+            for index, (tile, picture, status, _) in enumerate(tile_widgets):
+                scaled = magnitude_images[index]
+                out_h, out_w = min(132, scaled.shape[0]), min(160, scaled.shape[1])
+                crop_h = max(1, int(round(scaled.shape[0] / zoom)))
+                crop_w = max(1, int(round(scaled.shape[1] / zoom)))
+                y0 = (scaled.shape[0] - crop_h) // 2
+                x0 = (scaled.shape[1] - crop_w) // 2
+                crop = scaled[y0:y0 + crop_h, x0:x0 + crop_w]
+                ys = np.linspace(0, crop.shape[0] - 1, out_h).astype(int)
+                xs = np.linspace(0, crop.shape[1] - 1, out_w).astype(int)
+                high = max(maximum_value.get(), np.finfo(float).eps)
+                shown = np.clip(crop[np.ix_(ys, xs)] / high, 0, 1)
+                gray = np.asarray(np.round(np.nan_to_num(shown, nan=0.0) * 255), dtype=np.uint8)
+                image_refs[index] = png_photo(gray)
+                picture.configure(image=image_refs[index])
+
+        zoom_scale.configure(command=refresh_tiles)
+
+        def redraw():
+            for tile, picture, status, index in tile_widgets:
+                rejected = keep[slc, index] == 0
+                color = '#d7191c' if rejected else '#238b45'
+                origin = 'auto' if keep[slc, index] == automatic_keep[slc, index] else 'manual'
+                decision = 'REJECT' if rejected else 'KEEP'
+                tile.configure(background=color, highlightbackground=color)
+                picture.configure(background=color)
+                status.configure(text=f'{index + 1}: {decision} ({origin})',
+                                 foreground='white' if rejected else '#102d19', background=color)
+
+        def apply_slice(event=None):
+            window.unbind_all('<MouseWheel>')
+            window.destroy()
+
+        for tile, picture, status, index in tile_widgets:
+            for widget in (tile, picture, status):
+                widget.bind('<Button-1>', lambda event, i=index: toggle(i))
+
+        def toggle(index):
+            keep[slc, index] = 1 - keep[slc, index]
+            redraw()
+
+        footer = ttk.Frame(window, padding=8)
+        footer.grid(row=3, column=0, sticky='ew')
+        ttk.Label(footer, text='Green = keep   Red = reject   (auto/manual shows decision source)').pack(side='left')
+        ttk.Button(footer, text='Apply slice and continue', command=apply_slice).pack(side='right')
+        window.bind('<Return>', apply_slice)
+        window.protocol('WM_DELETE_WINDOW', apply_slice)
+        window.update_idletasks()
+        refresh_tiles()
+        update_intensity(maximum_value.get())
+        redraw()
+        wait_window(window)
+    if save_decisions and diagnostics_path:
+        decision_dir = os.path.join(diagnostics_path, '13_Diagnostics')
+        os.makedirs(decision_dir, exist_ok=True)
+        bvals = np.asarray(bvals) if bvals is not None else np.full(n_images, np.nan)
+        bvecs = np.asarray(bvecs) if bvecs is not None else np.full((n_images, 3), np.nan)
+        decisions = []
+        for slc in range(n_slices):
+            for image_index in range(n_images):
+                auto_keep = bool(automatic_keep[slc, image_index])
+                final_keep = bool(keep[slc, image_index])
+                decisions.append({
+                    'slice_index': slc,
+                    'stacked_image_index': image_index,
+                    'b_value': float(bvals[image_index]),
+                    'b_vector': [float(v) for v in bvecs[image_index]],
+                    'automatic_decision': 'keep' if auto_keep else 'reject',
+                    'manual_decision': 'keep' if final_keep else 'reject',
+                    'manually_changed': auto_keep != final_keep,
+                })
+        with open(os.path.join(decision_dir, 'Rejection_Decisions.json'), 'w', encoding='utf-8') as stream:
+            json.dump({'automatic_keep': automatic_keep.tolist(),
+                       'final_keep': keep.tolist(), 'decisions': decisions}, stream, indent=2)
+    return keep
+
+
+def _save_rejection_configuration(directory, images, bvals, bvecs, coordinates,
+                                  automatic_keep, final_keep, operation_type):
+    import json
+    import os
+    import numpy as np
+    os.makedirs(directory, exist_ok=True)
+    payload = dict(image_shape=list(images.shape), bvals=np.asarray(bvals).tolist(),
+                   bvecs=np.asarray(bvecs).tolist(), crop_coordinates=np.asarray(coordinates).tolist(),
+                   automatic_keep=np.asarray(automatic_keep).tolist(),
+                   final_keep=np.asarray(final_keep).tolist(), operation_type=operation_type)
+    path = os.path.join(directory, 'Rejection_Configuration.json')
+    with open(path + '.tmp', 'w', encoding='utf-8') as stream:
+        json.dump(payload, stream, indent=2)
+    os.replace(path + '.tmp', path)
+
+
+def _load_rejection_configuration(directory, images, bvals, bvecs, operation_type):
+    """Restore decisions only for matching geometry and ordered encodings.
+
+    Older outputs store crop bounds and reviewed decisions in separate files.
+    Missing decisions mean rejection is unfinished and must run interactively.
+    """
+    import json
+    import re
+    from pathlib import Path
+    import numpy as np
+    directory = Path(directory)
+    path = directory / 'Rejection_Configuration.json'
+    if path.exists():
+        payload = json.loads(path.read_text())
+        if (payload['image_shape'] != list(images.shape)
+                or payload['operation_type'] != operation_type
+                or not np.array_equal(payload['bvals'], bvals)
+                or not np.array_equal(payload['bvecs'], bvecs)):
+            raise ValueError('Saved rejection configuration does not match the input geometry/encodings; use mode off to redo it.')
+        coordinates = payload['crop_coordinates']
+    else:
+        crop = directory / 'Crop_Coordinates.txt'
+        decisions = directory / 'Rejection_Decisions.json'
+        if not crop.exists() or not decisions.exists():
+            return None
+        payload = json.loads(decisions.read_text())
+        rows = re.findall(r'Slice (\d+): x_start=(\d+), x_end=(\d+), y_start=(\d+), y_end=(\d+)', crop.read_text())
+        if [int(row[0]) for row in rows] != list(range(1, images.shape[2] + 1)):
+            raise ValueError('Saved crop slice count does not match the input.')
+        coordinates = [list(values) for values in zip(*[list(map(int, row[1:])) for row in rows])]
+        for decision in payload['decisions']:
+            idx = decision['stacked_image_index']
+            if (not 0 <= idx < len(bvals) or not np.isclose(decision['b_value'], bvals[idx])
+                    or not np.allclose(decision['b_vector'], bvecs[idx])):
+                raise ValueError('Saved rejection decisions do not match the ordered input encodings.')
+    bounds = np.asarray(coordinates)
+    if bounds.shape != (4, images.shape[2]) or not np.isfinite(bounds).all() or not np.equal(bounds, np.floor(bounds)).all():
+        raise ValueError('Invalid saved crop coordinates.')
+    x0, x1, y0, y1 = bounds
+    if not ((0 <= x0).all() and (x0 < x1).all() and (x1 <= images.shape[1]).all()
+            and (0 <= y0).all() and (y0 < y1).all() and (y1 <= images.shape[0]).all()):
+        raise ValueError('Saved crop lies outside the input image.')
+    automatic = np.asarray(payload['automatic_keep'])
+    final = np.asarray(payload['final_keep'])
+    for keep in (automatic, final):
+        if keep.shape != images.shape[2:] or not np.isin(keep, [0, 1]).all():
+            raise ValueError('Saved rejection decisions do not match slices/acquisitions.')
+    return bounds.astype(int).tolist(), automatic, final

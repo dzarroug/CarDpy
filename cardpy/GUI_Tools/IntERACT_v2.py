@@ -7,17 +7,21 @@ from cardpy.GUI_Tools._image_controls import ImagePanel, crop_bounds, size_windo
 
 
 class CropWindow:
-    def __init__(self, matrix, organ):
+    def __init__(self, matrix, organ, initial_coordinates=None):
         self.matrix = np.asarray(matrix)
         if self.matrix.ndim != 4 or any(size == 0 for size in self.matrix.shape):
             raise ValueError('Cropping expects [rows, columns, slices, acquisitions].')
         self.slc = 0
         self.saved = [None] * self.matrix.shape[2]
         self.bounds = crop_bounds(None, self.matrix.shape)
+        if initial_coordinates is not None:
+            coordinates = np.asarray(initial_coordinates)
+            if coordinates.shape != (4, self.matrix.shape[2]):
+                raise ValueError('Saved crop must contain four coordinates per slice.')
+            self.saved = [crop_bounds(values, self.matrix.shape) for values in coordinates.T]
+            self.bounds = self.saved[0].copy()
         self.result = None
         self.window = create_window('CarDpy: Box Crop — ' + str(organ))
-        ttk.Style(self.window).configure('CardpyV2.TButton',
-                                         font=('Verdana', 12), padding=(10, 6))
         size_window(self.window)
         self.window.columnconfigure(0, weight=1)
         self.window.rowconfigure(1, weight=1)
@@ -32,12 +36,12 @@ class CropWindow:
             props={'edgecolor': '#61ba86', 'facecolor': '#61ba86', 'alpha': 0.3, 'linewidth': 2})
         footer = ttk.Frame(self.window, padding=8)
         footer.grid(row=2, column=0, sticky='ew')
-        ttk.Button(footer, style='CardpyV2.TButton', text='Cancel', command=self.cancel).pack(side='left')
-        ttk.Button(footer, style='CardpyV2.TButton', text='Draw new box', command=self.selector.clear).pack(side='left', padx=6)
-        ttk.Button(footer, style='CardpyV2.TButton', text='Full image', command=self.reset).pack(side='left', padx=6)
-        self.back_button = ttk.Button(footer, style='CardpyV2.TButton', text='Back', command=self.back)
+        ttk.Button(footer, text='Cancel', command=self.cancel).pack(side='left')
+        ttk.Button(footer, text='Draw new box', command=self.selector.clear).pack(side='left', padx=6)
+        ttk.Button(footer, text='Full image', command=self.reset).pack(side='left', padx=6)
+        self.back_button = ttk.Button(footer, text='Back', command=self.back)
         self.back_button.pack(side='left', padx=6)
-        self.next_button = ttk.Button(footer, style='CardpyV2.TButton', command=self.next_slice)
+        self.next_button = ttk.Button(footer, command=self.next_slice)
         self.next_button.pack(side='right')
         self.update_box()
 
@@ -96,8 +100,8 @@ class CropWindow:
         self.close()
 
 
-def INTERACT_GUI(original_matrix, organ_of_intrest):
-    app = CropWindow(original_matrix, organ_of_intrest)
+def INTERACT_GUI(original_matrix, organ_of_intrest, initial_coordinates=None):
+    app = CropWindow(original_matrix, organ_of_intrest, initial_coordinates=initial_coordinates)
     wait_window(app.window)
     if app.result is None:
         raise RuntimeError('Crop selection cancelled.')

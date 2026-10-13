@@ -1,4 +1,4 @@
-from cardpy.GUI_Tools._runtime import create_window, wait_window
+from cardpy.GUI_Tools._runtime import create_window, wait_window, with_scan_name
 import matplotlib.pyplot as plt
 from   sys                               import platform
 import tkinter                           as tk
@@ -7,10 +7,12 @@ import numpy                             as np
 from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from   screeninfo                        import get_monitors
 
-def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='legacy'):
+def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='legacy', initial_coordinates=None):
     if gui_version == 'v2':
         from cardpy.GUI_Tools.IntERACT_v2 import INTERACT_GUI as box_crop
-        return box_crop(original_matrix, organ_of_intrest)
+        return box_crop(original_matrix, organ_of_intrest, initial_coordinates=initial_coordinates)
+    if initial_coordinates is not None:
+        raise ValueError('Saved crop review requires gui.version="v2".')
     if gui_version != 'legacy':
         raise ValueError("gui_version must be 'legacy' or 'v2'.")
     from   sys                               import platform
@@ -116,7 +118,7 @@ def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='legacy'):
     root.geometry(geometry_string)
     root.minsize(int(window_width * 0.5), int(window_height * 0.5))
     root.resizable(1, 1)  # allow manual resize as a safety net if auto-sizing is still off
-    root.title('INTeractive Enhanced Rectangular Area Cropping Tool')
+    root.title(with_scan_name('INTeractive Enhanced Rectangular Area Cropping Tool'))
     root.update_idletasks()
     
     #new

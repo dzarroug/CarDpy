@@ -12,7 +12,7 @@ def fft2c(image_space):
     ########## Import Modules ######################################################################################################################
     import numpy as np                                                      # Import numpy module
     ########## Convert to k-space ##################################################################################################################
-    k_space = np.fft.fftshift(np.fft.fft2(np.fft.fftshift(image_space)))    # Convert image space data to k-space data
+    k_space = np.fft.fftshift(np.fft.fft2(np.fft.ifftshift(image_space)))    # Convert image space data to k-space data
     return k_space
 
 def ifft2c(k_space):

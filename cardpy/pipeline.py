@@ -1,7 +1,8 @@
 import os
-import json
 import warnings
+import json
 import numpy as np
+from cardpy.workflow_state import write_processing_status
 
 warnings.filterwarnings('ignore', module='dipy')
 warnings.filterwarnings('ignore', module='sklearn')
@@ -23,7 +24,7 @@ from cardpy.Data_Processing.Registration          import register
 from cardpy.Data_Processing.Rejection             import shot_rejection
 from cardpy.Data_Processing.Respiratory           import respiratory_sorting
 from cardpy.Data_Processing.Diffusivity           import ADC_Filter
-from cardpy.Data_Processing.Averaging             import average
+from cardpy.Data_Processing.Averaging             import average, remove_background_phase
 from cardpy.Data_Processing.Denoising             import denoise
 from cardpy.Data_Processing.Interpolation         import zero_filled
 from cardpy.Data_Processing.Segmentation_Matrix_DTI import DTI_segmentation_matrix
@@ -33,6 +34,7 @@ from cardpy.Data_Processing.HAP                   import helix_angle_pitch
 from cardpy.Colormaps                             import cDTI_Colormaps_Generator
 from cardpy.Tools.Contours                        import Myocardial_Mask_Contour_Filler
 from cardpy.GUI_Tools.IntERCOMS_Spline            import New_GUI
+from cardpy.GUI_Tools._runtime                    import set_scan_name
 
 from scipy.stats           import gaussian_kde
 from sklearn.linear_model  import LinearRegression
@@ -73,7 +75,7 @@ def _save_quantitative_maps(matrix, Standard_DTI_Metrics, Cardiac_DTI_Metrics,
 
     for slc in range(mask_smoothed_nan.shape[2]):
         print('Slice %i of %i' % (slc + 1, mask_smoothed_nan.shape[2]))
-        background = np.nanmean(np.abs(matrix[:, :, slc, :, :]), axis=(2, 3))
+        background = np.nanmean(np.real(matrix[:, :, slc, :, :]), axis=(2, 3))
         fig = plt.figure(figsize=(20, 16), dpi=100)
         fig.patch.set_facecolor('white')
         fig.suptitle('Quantitative cDTI Maps for Slice %i' % (slc + 1), fontsize=20, fontweight='bold')
@@ -155,23 +157,21 @@ def _load(study_root, config):
     return matrix, bvals, bvecs, Header
 
 
-def process(study_root, config, save=True, segmentation=None):
+def process(study_root, config, save=True):
     """
     Run the full CarDpy pipeline end to end in one call.
     Stalls at the contouring GUI (once per slice) until each window is closed,
     then resumes automatically. Writes stage outputs to CarDpy_Output when
     save=True. Returns a dict of results.
-    For stationary phantom scans on the same image grid, pass the first result's
-    segmentation dict to reuse its contours and display crops without opening
-    contour windows. A saved 11_Segmentation/Segmentation.json can also be loaded
-    with json.load and passed here.
     """
     out_path = config.get("output", {}).get("directory") or os.path.join(study_root, "CarDpy_Output")
     out_path = os.path.abspath(os.path.expanduser(os.fspath(out_path)))
     if save:
         os.makedirs(out_path, exist_ok=True)
+        write_processing_status(out_path, "running")
 
     op       = config["operation_type"]
+    complex_real_signal = op == 'Complex'
     reg_alg  = config["registration"]["algorithm"]
     reg_den  = config["registration"]["temporary_denoising"]
     reg_mode = config["registration"].get("mode", "2D")
@@ -181,8 +181,19 @@ def process(study_root, config, save=True, segmentation=None):
     if reg_mode == '3D' and reg_alg != 'Rigid':
         raise ValueError('3D registration supports only Rigid; set registration.algorithm="Rigid".')
 
-    gui      = config.get("gui", {})
+    gui      = dict(config.get("gui", {}))
+    saved_mode = gui.get("saved_configuration_mode", "off")
+    if saved_mode not in ('off', 'reuse', 'review'):
+        raise ValueError('gui.saved_configuration_mode must be off, reuse, or review.')
+    if saved_mode != 'off':
+        gui['reuse_existing_segmentation'] = True
+        gui['segmentation_review'] = saved_mode == 'review'
+
     gui_version = gui.get("version", "legacy")
+    scan_name = gui.get("scan_name") or os.path.basename(os.path.normpath(out_path))
+    if scan_name in ('', 'CarDpy_Output'):
+        scan_name = os.path.basename(os.path.normpath(os.fspath(study_root)))
+    set_scan_name(scan_name)
     if gui_version not in ('legacy', 'v2'):
         raise ValueError("gui.version must be 'legacy' or 'v2'.")
     segmentation_crop = None
@@ -252,8 +263,9 @@ def process(study_root, config, save=True, segmentation=None):
             NRMSE_threshold=r["nrmse_threshold"], NSSIM_threshold=r["nssim_threshold"],
             zoom=r["zoom"], IntERACT_zoom=r["interact_zoom"], organ=r["organ"],
             operation_type=op, diagnostics_path=out_path, gui_version=gui_version,
+            save_diagnostics=save and config.get("output", {}).get("save_diagnostics", True),
             manual_review=r.get("manual_review", False),
-            save_diagnostics=save and config.get("output", {}).get("save_diagnostics", True))
+            saved_configuration_mode=saved_mode)
         if gui_version == 'v2' and len(Slice_Coordinates) == 4:
             segmentation_crop = Slice_Coordinates
             crop_shape = m2.shape[:2]
@@ -348,6 +360,12 @@ def process(study_root, config, save=True, segmentation=None):
             aligned = True
         _save_stage('Registered', m, b, v, Header)
 
+    # Correct complex repetitions while their individual images are finite.
+    # Rejected whole shots remain missing; ADC adds voxel-wise masks afterward.
+    if op == 'Complex':
+        m = remove_background_phase(m)
+        _save_stage('Phase_Corrected', m, b, v, Header)
+
     # ----- ADC filter -----
     if config["adc_filter"]["enabled"]:
         print('ADC Filter mode is on.')
@@ -362,13 +380,16 @@ def process(study_root, config, save=True, segmentation=None):
         print('Averaging mode is on.')
         if dictionary_processing:
             m, b, v = dictionary2sorted(sorted2dictionary(m, b, v),
-                                         mode='average', operation_type=op)
+                                         mode='average', operation_type=op, phase_corrected=op == 'Complex')
         else:
-            m, b, v = average(m, b, v, operation_type=op)
+            m, b, v = average(m, b, v, operation_type=op, phase_corrected=op == 'Complex')
         if config["registration"]["enabled"] and not aligned:
             m, b, v = register(m, b, v, **register_options)
             aligned = True
         _save_stage('Averaged', m, b, v, Header)
+
+    if op == 'Complex' and not config['averaging']['enabled']:
+        m = np.real(m)  # Each repetition has already had background phase removed.
 
     # ----- Denoising -----
     if config["denoising"]["enabled"]:
@@ -376,12 +397,17 @@ def process(study_root, config, save=True, segmentation=None):
         d = config["denoising"]
         m, b, v = denoise(m, b, v, denoising_algorithm=d["algorithm"],
                           numCoils=d["number_of_coils"], operation_type=op, b0_threshold=b0_threshold)
+        if complex_real_signal:
+            m = np.real(m)
         _save_stage('Denoised', m, b, v, Header)
 
     # ----- Interpolation -----
     if config["interpolation"]["enabled"]:
         print('Interpolating mode is on.')
-        m, b, v = zero_filled(m, b, v, operation_type=op)
+        m, b, v = zero_filled(m, b, v, operation_type=op,
+                              kaiser_beta=config["interpolation"].get("kaiser_beta"))
+        if complex_real_signal:
+            m = np.real(m)
         Header = dict(Header)
         for axis, dim in (('X', 0), ('Y', 1)):
             Header[axis + ' Resolution'] = spacing[dim] * input_shape[dim] / m.shape[dim]
@@ -407,62 +433,59 @@ def process(study_root, config, save=True, segmentation=None):
     # ===== DTI recon =====
     _, _, Eigenvectors, Standard_DTI_Metrics = DTI_recon(m, b, v, tensor_fit=config["dti"]["tensor_fit"], b0_threshold=b0_threshold)
 
-    # ===== Contouring (optionally reuse a stationary phantom segmentation) =====
-    image_shape = list(m.shape[:3])
-    voxel_spacing = [float(Header.get(axis + ' Resolution', spacing[index]))
-                     for index, axis in enumerate(('X', 'Y', 'Z'))]
-    selected_slices = config.get('slice_index')
-    if selected_slices is not None:
-        selected_slices = [int(index) for index in selected_slices]
-    if segmentation is not None:
-        if (list(segmentation['image_shape']) != image_shape
-                or segmentation['slice_index'] != selected_slices
-                or not np.allclose(segmentation['voxel_spacing'], voxel_spacing,
-                                   rtol=1e-5, atol=1e-8)):
-            raise ValueError('Reused segmentation requires matching image shape, voxel spacing and slice selection. Redraw the phantom mask.')
-        from cardpy.GUI_Tools._image_controls import crop_bounds
-        contours = segmentation['contours']
-        endo_x, endo_y = contours['endo_x'], contours['endo_y']
-        epi_x, epi_y = contours['epi_x'], contours['epi_y']
-        antRVIP, infRVIP = contours['antRVIP'], contours['infRVIP']
-        if any(len(values) != m.shape[2] for values in
-               (endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP, segmentation['crop_bounds'])):
-            raise ValueError('Reused segmentation must contain contours and a crop for every slice.')
-        display_crops = [crop_bounds(bounds, m.shape[:2]) for bounds in segmentation['crop_bounds']]
-        print('Reusing phantom contours and display crops.')
-    else:
-        display_crops = []
-        endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
-        for slc in range(m.shape[2]):
-            diffusion = b > np.min(b)
-            avg_diff = np.nanmean(np.abs(m[:, :, slc, diffusion, :]), axis=(2, 3))
-            MD       = Standard_DTI_Metrics['MD'][:, :, slc]
-            E1       = Eigenvectors['E1'][:, :, slc, :]
-            if gui_version == 'v2':
-                bounds = None
-                if gui.get("segmentation_zoom", True) and segmentation_crop is not None:
-                    from cardpy.GUI_Tools._image_controls import scale_crop
-                    bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
-                                        crop_shape, m.shape[:2])
-                contour, bounds = New_GUI(
-                    avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
-                    md_max=gui.get("md_max", 3.0), point_size=gui.get("point_size", 8.0),
-                    return_crop=True)
-                ex, ey, px, py, aRV, iRV = contour
-            else:
-                ex, ey, px, py, aRV, iRV = New_GUI(avg_diff, MD, E1)
-                bounds = [0, m.shape[1], 0, m.shape[0]]
-            display_crops.append(bounds)
-            endo_x.append([ex]); endo_y.append([ey]); epi_x.append([px])
-            epi_y.append([py]); antRVIP.append([aRV]); infRVIP.append([iRV])
-
-    segmentation_data = {
-        'image_shape': image_shape, 'voxel_spacing': voxel_spacing,
-        'slice_index': selected_slices, 'crop_bounds': display_crops,
-        'contours': {key: np.asarray(values).tolist() for key, values in
-                     (('endo_x', endo_x), ('endo_y', endo_y), ('epi_x', epi_x),
-                      ('epi_y', epi_y), ('antRVIP', antRVIP), ('infRVIP', infRVIP))},
-    }
+    # ===== Contouring =====
+    endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
+    saved_segmentation = None
+    segmentation_json = gui.get("segmentation_json")
+    if not segmentation_json and gui.get('reuse_existing_segmentation', False):
+        candidate = os.path.join(out_path, '11_Segmentation', 'Segmentation.json')
+        if os.path.isfile(candidate):
+            segmentation_json = candidate
+    review_segmentation = gui.get('segmentation_review', True)
+    if segmentation_json and review_segmentation and gui_version != 'v2':
+        raise ValueError('Saved segmentation review requires gui.version="v2".')
+    if segmentation_json:
+        print('Loading saved segmentation for %s: %s' % ('review' if review_segmentation else 'reuse', segmentation_json))
+        with open(os.path.expanduser(segmentation_json), encoding="utf-8") as stream:
+            saved_segmentation = json.load(stream)
+        if not isinstance(saved_segmentation, dict) or "image_shape" not in saved_segmentation or "contours" not in saved_segmentation:
+            raise ValueError("Saved segmentation must contain image_shape and contours.")
+        if len(saved_segmentation["contours"].get("endo_x", [])) != m.shape[2]:
+            raise ValueError("Saved segmentation slice count does not match the processed data.")
+        source_shape = np.asarray(saved_segmentation["image_shape"], dtype=float)
+        if source_shape.shape != (2,) or not np.isfinite(source_shape).all() or np.any(source_shape <= 0):
+            raise ValueError('Saved segmentation image_shape must contain two positive dimensions.')
+        scale_x, scale_y = m.shape[1] / source_shape[1], m.shape[0] / source_shape[0]
+    for slc in range(m.shape[2]):
+        diffusion = b > np.min(b)
+        avg_diff = np.nanmean(np.real(m[:, :, slc, diffusion, :]), axis=(2, 3))
+        MD       = Standard_DTI_Metrics['MD'][:, :, slc]
+        E1       = Eigenvectors['E1'][:, :, slc, :]
+        initial_contours = None
+        if saved_segmentation is not None:
+            c = saved_segmentation["contours"]
+            ex = (np.asarray(c["endo_x"][slc][0]) * scale_x).tolist()
+            ey = (np.asarray(c["endo_y"][slc][0]) * scale_y).tolist()
+            px = (np.asarray(c["epi_x"][slc][0]) * scale_x).tolist()
+            py = (np.asarray(c["epi_y"][slc][0]) * scale_y).tolist()
+            aRV = (np.asarray(c["antRVIP"][slc][0]) * [scale_x, scale_y]).tolist()
+            iRV = (np.asarray(c["infRVIP"][slc][0]) * [scale_x, scale_y]).tolist()
+            initial_contours = {
+                'endo': np.column_stack((ex, ey)), 'epi': np.column_stack((px, py)),
+                'antRVIP': np.asarray(aRV)[None, :], 'infRVIP': np.asarray(iRV)[None, :],
+            }
+        if saved_segmentation is None or review_segmentation:
+            bounds = None
+            if gui.get("segmentation_zoom", True) and segmentation_crop is not None:
+                from cardpy.GUI_Tools._image_controls import scale_crop
+                bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
+                                    crop_shape, m.shape[:2])
+            ex, ey, px, py, aRV, iRV = New_GUI(
+                avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
+                md_max=gui.get("md_max", 3.0), point_size=gui.get("point_size", 8.0),
+                scan_name=scan_name, initial_contours=initial_contours)
+        endo_x.append([ex]); endo_y.append([ey]); epi_x.append([px])
+        epi_y.append([py]); antRVIP.append([aRV]); infRVIP.append([iRV])
 
     # ===== Masks =====
     myocardium_mask = np.zeros([m.shape[0], m.shape[1], m.shape[2]])
@@ -477,8 +500,37 @@ def process(study_root, config, save=True, segmentation=None):
         seg_path = os.path.join(out_path, '11_Segmentation')
         os.makedirs(seg_path, exist_ok=True)
         Save_NRRD_Segmentation(myocardium_mask, Header, seg_path, 'LV_Myocardium')
-        with open(os.path.join(seg_path, 'Segmentation.json'), 'w') as handle:
-            json.dump(segmentation_data, handle, indent=2)
+        segmentation_data = {"image_shape": list(m.shape[:2]),
+                             "voxel_spacing": [float(Header.get(axis + ' Resolution', 1.0)) for axis in ('X', 'Y', 'Z')],
+                             "slice_index": list(range(m.shape[2])),
+                             "crop_bounds": None,
+                             "contours": {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
+                                          "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP}}
+        with open(os.path.join(seg_path, 'Segmentation.json'), 'w', encoding='utf-8') as stream:
+            json.dump(segmentation_data, stream, indent=2)
+        # Export contours to the acquired/intermediate matrix grid for later reuse.
+        low_x, low_y = input_shape[1] / m.shape[1], input_shape[0] / m.shape[0]
+        low = json.loads(json.dumps(segmentation_data))
+        low["image_shape"] = list(input_shape[:2])
+        low["voxel_spacing"] = [float(Header.get('X Resolution', 1.0)) / low_y,
+                                 float(Header.get('Y Resolution', 1.0)) / low_x,
+                                 float(Header.get('Z Resolution', 1.0))]
+        for key in ('endo_x', 'epi_x'):
+            low['contours'][key] = [[[float(x) * low_x for x in points] for points in slices] for slices in low['contours'][key]]
+        for key in ('endo_y', 'epi_y'):
+            low['contours'][key] = [[[float(y) * low_y for y in points] for points in slices] for slices in low['contours'][key]]
+        for key in ('antRVIP', 'infRVIP'):
+            low['contours'][key] = [[[float(point[0]) * low_x, float(point[1]) * low_y]
+                                     for point in slice_points] for slice_points in low['contours'][key]]
+        with open(os.path.join(seg_path, 'Segmentation_low_resolution.json'), 'w', encoding='utf-8') as stream:
+            json.dump(low, stream, indent=2)
+        if tuple(myocardium_mask.shape[:2]) != tuple(input_shape[:2]):
+            from scipy.ndimage import zoom as ndi_zoom
+            low_mask = ndi_zoom(myocardium_mask, (low_y, low_x, 1), order=0)
+            low_header = dict(Header)
+            low_header['X Resolution'] = float(Header['X Resolution']) / low_y
+            low_header['Y Resolution'] = float(Header['Y Resolution']) / low_x
+            Save_NRRD_Segmentation(low_mask, low_header, seg_path, 'LV_Myocardium_low_resolution')
 
     # ===== cDTI analysis =====
     c    = config["cdti"]
@@ -517,6 +569,9 @@ def process(study_root, config, save=True, segmentation=None):
         _save_quantitative_maps(m, Standard_DTI_Metrics, Cardiac_DTI_Metrics,
                                 Eigenvectors, mask_smoothed_nan, grid_nan, qr_path)
 
+    if save:
+        write_processing_status(out_path, "complete")
+
     return {
         "HAP":             pitch["HAP"],
         "HAP_mm":          pitch["HAP_mm"],
@@ -531,8 +586,6 @@ def process(study_root, config, save=True, segmentation=None):
         "bvals":           b,
         "bvecs":           v,
         "header":          Header,
-        "segmentation":    segmentation_data,
-        "crop_bounds":     display_crops,
         "contours":        {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                             "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP},
     }

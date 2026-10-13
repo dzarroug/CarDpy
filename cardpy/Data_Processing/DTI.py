@@ -37,8 +37,11 @@ def DTI_recon(original_matrix, original_bvals, original_bvecs, tensor_fit = 'NLL
     from   dipy.core.gradients           import gradient_table                                                          # Import gradient table from DiPy
     import dipy.reconst.dti              as dti                                                                         # Import DTI reconstruction from DiPy
     ########## Address data type of original data #################################################################################################
-    if np.iscomplexobj(original_matrix):                                                                           # If data type is complex ...
-        original_matrix = np.abs(original_matrix)                                                                       # Convert data to magnitude
+    if np.iscomplexobj(original_matrix):
+        # Direct complex inputs need phase correction before taking the real
+        # signal. The pipeline already supplies corrected, real signals.
+        from cardpy.Data_Processing.Averaging import remove_background_phase
+        original_matrix = np.real(remove_background_phase(original_matrix))
     ########## Convert sorted data into stacked data ##############################################################################################
     [stacked_matrix, stacked_bvals, stacked_bvecs] = sorted2stacked(original_matrix, original_bvals, original_bvecs)    # Convert sorted data into stacked data
     if not np.isfinite(stacked_matrix).all():
