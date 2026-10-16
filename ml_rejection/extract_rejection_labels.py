@@ -3,10 +3,10 @@ extract_rejection_labels.py
 Recover shot-rejection ground truth from CarDpy outputs (PURL yh756nh8583).
 
 shot_rejection replaces a rejected image with a COPY of a randomly chosen good
-average. So, comparing 02_Rejected against 01_Unrung, per [slice, volume]:
-  kept         Rejected[:, :, s, v] == Unrung[:, :, s, v]
-  rejected     Rejected[:, :, s, v] == Unrung[:, :, s, w]  for some w != v
-  unexplained  matches nothing -> assumption violated, inspect by hand
+average from the same slice/direction, so rejected slots show up as exact
+duplicates within 02_Rejected. See label_dataset for how the source vs the
+rejected copy is decided. Groups with a small correlation margin between the
+top two members are flagged 'ambiguous' for manual review.
 
 Comparison is done in stacked space (4D [rows, cols, slices, vols]), so no
 dependency on stacked2sorted. direction/average are derived from bvals/bvecs
@@ -60,7 +60,20 @@ def direction_average_index(bvals, bvecs, decimals=4):
     return np.array(direction), np.array(average)
 
 
-def label_dataset(unrung_dir, rejected_dir, rel_tol=1e-5):
+def _corr(a, b):
+    a, b = a.ravel() - a.mean(), b.ravel() - b.mean()
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+
+
+def label_dataset(unrung_dir, rejected_dir, ambiguous_margin=0.02):
+    """
+    Exact-duplicate method. shot_rejection fills a rejected slot with a copy of
+    a good average, so in 02_Rejected the copy and its source are identical.
+    Within each duplicate group, the source is the member whose 02_Rejected
+    image best matches its OWN 01_Unrung image; all other members are rejected.
+    (01 -> 02 values are not identical even for kept images -- likely
+    registration -- so the duplicate test is done within 02_Rejected.)
+    """
     U, bvals, bvecs = load_folder(unrung_dir)
     R, bvals_r, _ = load_folder(rejected_dir)
     if U.shape != R.shape:
@@ -72,22 +85,32 @@ def label_dataset(unrung_dir, rejected_dir, rel_tol=1e-5):
     n_slices, n_vols = U.shape[2], U.shape[3]
     rows = []
     for s in range(n_slices):
-        Us = U[:, :, s, :]
-        tol = rel_tol * max(np.abs(Us).max(), 1e-12)
+        groups = {}
         for v in range(n_vols):
-            r = R[:, :, s, v]
-            diffs = np.abs(r[:, :, None] - Us).max(axis=(0, 1))   # vs every Unrung volume
-            if diffs[v] <= tol:
-                label, src = "kept", v
-            else:
-                diffs[v] = np.inf
-                w = int(np.argmin(diffs))
-                label, src = ("rejected", w) if diffs[w] <= tol else ("unexplained", -1)
+            groups.setdefault(R[:, :, s, v].tobytes(), []).append(v)
+        info = {v: dict(label="kept", source_volume=v, margin=np.nan, group_size=1)
+                for v in range(n_vols)}
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            scores = {v: _corr(R[:, :, s, v], U[:, :, s, v]) for v in members}
+            ranked = sorted(members, key=scores.get, reverse=True)
+            src = ranked[0]
+            margin = scores[ranked[0]] - scores[ranked[1]]
+            for v in members:
+                info[v] = dict(label="kept" if v == src else "rejected",
+                               source_volume=src, margin=margin,
+                               group_size=len(members))
+        for v in range(n_vols):
+            d = info[v]
+            src = d["source_volume"]
             rows.append(dict(
                 slice=s, volume=v, direction=int(direction[v]), average=int(average[v]),
-                bval=float(bvals[v]), label=label, source_volume=src,
-                source_average=int(average[src]) if src >= 0 else -1,
-                same_direction=bool(direction[src] == direction[v]) if src >= 0 else None,
+                bval=float(bvals[v]), label=d["label"], source_volume=src,
+                source_average=int(average[src]),
+                same_direction=bool(direction[src] == direction[v]),
+                group_size=d["group_size"], margin=d["margin"],
+                ambiguous=bool(d["group_size"] > 1 and d["margin"] < ambiguous_margin),
             ))
     return pd.DataFrame(rows)
 
@@ -96,7 +119,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("root", help="folder containing the downloaded datasets")
     ap.add_argument("-o", "--out", default="rejection_labels.csv")
-    ap.add_argument("--rel-tol", type=float, default=1e-5)
+    ap.add_argument("--ambiguous-margin", type=float, default=0.02)
     args = ap.parse_args()
 
     unrung_dirs = sorted(glob.glob(os.path.join(args.root, "**", "01_Unrung"), recursive=True))
@@ -108,12 +131,12 @@ def main():
         name = os.path.relpath(parent, args.root)
         rd = os.path.join(parent, "02_Rejected")
         try:
-            df = label_dataset(ud, rd, args.rel_tol)
+            df = label_dataset(ud, rd, args.ambiguous_margin)
             df.insert(0, "dataset", name)
             frames.append(df)
             c = df["label"].value_counts()
             print(f"  {name}: {len(df)} imgs | rejected {c.get('rejected', 0)} "
-                  f"| unexplained {c.get('unexplained', 0)}")
+                  f"| ambiguous {int(df['ambiguous'].sum())}")
         except Exception as e:
             failures.append((name, str(e)))
             print(f"  {name}: FAILED -- {e}")
@@ -131,7 +154,8 @@ def main():
     print(f"datasets labelled : {len(frames)}  (failed: {len(failures)})")
     print(f"total images      : {n}")
     print(f"rejected          : {c.get('rejected', 0)}  ({100 * c.get('rejected', 0) / n:.2f}%)")
-    print(f"unexplained       : {c.get('unexplained', 0)}")
+    print(f"ambiguous groups  : {int(all_df['ambiguous'].sum())} rows flagged (check by hand)")
+    print(f"cross-direction duplicates (should be 0): {int((~all_df['same_direction']).sum())}")
     print(f"b=0 rejected      : {(rej['bval'] < 1).sum()}")
     print(f"replaced from same direction: {rej['same_direction'].sum()} / {len(rej)}")
     per_ds = all_df.groupby("dataset")["label"].apply(lambda x: (x == "rejected").sum())
