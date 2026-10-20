@@ -2,11 +2,14 @@
 build_cache.py
 Turn rejection_labels.csv + PURL_data into one training-ready array on disk.
 
-Each sample is 2 channels x 128 x 128 (float16):
+Each sample is 3 channels x 128 x 128 (float16):
   ch0 = the 01_Unrung image itself
-  ch1 = median of all averages for the same slice/direction (the "consensus")
-Both channels are scaled by the 99th percentile of ch1, so relative intensity
-(e.g. signal dropout vs. consensus) is preserved.
+  ch1 = median of all averages for the same slice/direction
+  ch2 = median of all images with the same b-value in the slice -- this is the
+        reference shot_rejection actually compares against (b=0 vs all b=0;
+        b>0 vs all b>0 across every direction)
+All channels are scaled by the 99th percentile of ch1, so relative intensity
+(e.g. signal dropout vs. reference) is preserved.
 
 Ambiguous rows are dropped here. Split is by PARTICIPANT (both blips of a
 participant always land in the same split) with a fixed seed.
@@ -14,7 +17,7 @@ participant always land in the same split) with a fixed seed.
 Usage:
     python ml_rejection/build_cache.py PURL_data rejection_labels.csv
 Outputs (in ml_rejection/cache/, gitignored):
-    X.npy     float16 [N, 2, 128, 128]  (memory-mapped)
+    X.npy     float16 [N, 3, 128, 128]  (memory-mapped)
     meta.csv  one row per sample, aligned with X: participant, split, y, ...
 """
 import argparse
@@ -52,7 +55,7 @@ def main():
     ap.add_argument("--out", default=os.path.join("ml_rejection", "cache"))
     ap.add_argument("--val", type=int, default=5, help="participants in validation")
     ap.add_argument("--test", type=int, default=5, help="participants in test")
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=51)
     args = ap.parse_args()
 
     df = pd.read_csv(args.labels)
@@ -73,21 +76,28 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     X = np.lib.format.open_memmap(os.path.join(args.out, "X.npy"), mode="w+",
-                                  dtype=np.float16, shape=(len(df), 2, SIZE, SIZE))
+                                  dtype=np.float16, shape=(len(df), 3, SIZE, SIZE))
     shapes = set()
     for d_i, (ds, g) in enumerate(df.groupby("dataset", sort=False)):
         nii = glob.glob(os.path.join(args.root, ds, "01_Unrung", "*.nii*"))[0]
         U = np.asarray(nib.load(nii).dataobj, dtype=np.float32)
         shapes.add(U.shape[:2])
         full = full_by_ds[ds]
+        shell_med = {}
         for (s, d), gg in g.groupby(["slice", "direction"]):
             vols = full[(full.slice == s) & (full.direction == d)]["volume"].unique()
+            b = float(gg["bval"].iloc[0])
+            if (s, b) not in shell_med:
+                shell_vols = full[(full.slice == s) & (np.isclose(full.bval, b))]["volume"].unique()
+                shell_med[(s, b)] = np.median(U[:, :, s, shell_vols], axis=2)
             med = np.median(U[:, :, s, vols], axis=2)
             scale = max(float(np.percentile(med, 99)), 1e-6)
             med_f = fit(med / scale)
+            shell_f = fit(shell_med[(s, b)] / scale)
             for idx, v in zip(gg.index, gg["volume"]):
                 X[idx, 0] = fit(U[:, :, s, v] / scale)
                 X[idx, 1] = med_f
+                X[idx, 2] = shell_f
         print(f"[{d_i + 1}] {ds}: {len(g)} samples")
     X.flush()
 

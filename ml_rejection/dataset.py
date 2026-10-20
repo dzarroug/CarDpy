@@ -5,7 +5,7 @@ PyTorch loaders over the cache written by build_cache.py.
     from dataset import get_loaders
     train_dl, val_dl, test_dl, pos_weight = get_loaders()
 
-Each batch: x float32 [B, 2, 128, 128], y float32 [B].
+Each batch: x float32 [B, C, 128, 128], y float32 [B].
 Training batches get light augmentation (random flips / 90-degree rotations,
 applied identically to both channels). Val/test are never augmented.
 """
