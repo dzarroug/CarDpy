@@ -13,6 +13,8 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     ########## Definition Outputs #################################################################################################################
     respiratory_matrix      : Sorted respiratory ordered diffusion data (5D - [rows, columns, slices, directions, averages]).
                               Data is sorted in the average dimension from expiration to inspiration.
+                              Shots containing nonfinite values (including NaNs from rejection) are excluded
+                              from motion estimation and preserved at the end of each slice/encoding.
     respiratory_bvals       : Sorted b-values.
     respiratory_bvecs       : Sorted b-vectors.
     """
@@ -48,7 +50,7 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
         temporary_matrix   = original_matrix                                                                                                            # Create temporary matrix variable
     [temporary_matrix_stacked, original_bvals_stacked, original_bvecs_stacked] = sorted2stacked(temporary_matrix, original_bvals, original_bvecs)   #
     ########## ROI Cropping for Image #############################################################################################################
-    Slice_Crop_Coortinates = []                                                                                                                     #
+    Slice_Crop_Coordinates = []                                                                                                                     #
     if crop_coordinates is not None:
         from cardpy.GUI_Tools._image_controls import crop_bounds
         if len(crop_coordinates) != 4 or any(len(values) != slices for values in crop_coordinates):
@@ -103,62 +105,74 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     y_start = Slice_Crop_Coordinates[2]
     y_end   = Slice_Crop_Coordinates[3]
 
-    ########## Denoise temporary matrix ###########################################################################################################
-    [denoised_matrix, _, _] = denoise(temporary_matrix,
-                                      original_bvals,
-                                      original_bvecs,
-                                      denoising_algorithm = 'LocalPCA')                                                                             # Denoise temporary matrix
-    ########## Apply local entropy filter for feature detection ###################################################################################
-    entropy_matrix = np.zeros(denoised_matrix.shape)                                                                                                # Initialize entropy matrix
-    
-    for avg in range(averages):                                                                                                                     # Iterate through averages
-        for dif in range(directions):                                                                                                                   # Iterate through diffusion directions
-            for slc in range(slices):                                                                                                                       # Iterate through slices
-                image = denoised_matrix[:, :, slc, dif, avg]
-                image_normalization = image / image.max()
-                normalized_entropy_image = entropy(image_normalization, disk(7))
-#                entropy_image = entropy(denoised_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg] / denoised_matrix[:, :, slc, dif, avg].max(), disk(7))                             # Compute entropy image
-                entropy_matrix[:, :, slc, dif, avg] = normalized_entropy_image                                                                                            # Store entropy image in entropy matrix
-    ##### Structural similarity index measure (SSIM) and root mean square error (RMSE) of entropy matrix across averages ##########################
-    SSIM = np.zeros([averages, averages, directions, slices])                                                                                       # Initialize SSIM matrix
-    RMSE = np.zeros([averages, averages, directions, slices])                                                                                       # Initialize RMSE matrix
-    for dif in range(directions):                                                                                                                   # Iterate through diffusion directions
-        for slc in range(slices):                                                                                                                       # Iterate through slices
-            for avg_i in range(averages):                                                                                                                   # Iterate through averages (ith average)
-                for avg_j in range(averages):                                                                                                                   # Iterate through averages (jth average)
-                    SSIM[avg_i, avg_j, dif, slc] = np.round(ssim(entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_i],
-                                                                 entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_j], data_range=2.0), 2)                                           # Calculate SSIM between ith and jth average
-                    RMSE[avg_i, avg_j, dif, slc] = np.round(np.sqrt(mse(entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_i],
-                                                                        entropy_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, avg_j])), 2)                                   # Calculate RMSE between ith and jth average
-    ########## Assess respiratory motion across averages and resort averages ######################################################################
-    for dif in range(directions):                                                                                                                   # Iterate through diffusion directions
-        for slc in range(slices):                                                                                                                       # Iterate through slices
-            acquisition_index = np.where(SSIM[:, :, dif, slc] == SSIM[:, :, dif, slc].min())                                                                # Identify index (indices) of minimum SSIM (largest difference between averages)
-            if len(acquisition_index[0]) > 2:                                                                                                               # If more than one pair of indices is identified ...
-                print('For diffusion direction %i on slice %i, SSIM is not enough: evaluating RSME' %(dif, slc))                                                # Print warning that RMSE will be the tie breaker
-                filtered_RMSE = RMSE[:, :, dif, slc]                                                                                                            # Create filtered RMSE matrix for current case
-                filtered_RMSE[SSIM[:, :, dif, slc] > SSIM[:, :, dif, slc].min()] = 0                                                                            # Filter out non-minimum SSIM values
-                acquisition_index = np.where(filtered_RMSE == filtered_RMSE.max())                                                                              # Identify index of acquisition with maximum RMSE (largest difference between averages)
-                if acquisition_index[0][0] == acquisition_index[0][1]:                                                                                          # If first two indicies are the same
-                    acquisition_index[0][1] = acquisition_index[0][2]                                                                                               # Take the third index instead
-            image_index_1 = acquisition_index[0][0]                                                                                                         # Define image index 1
-            image_index_2 = acquisition_index[0][1]                                                                                                         # Define image index 2
-            image_sum_1   = np.nansum(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, image_index_1])                                                               # Take the total pixel sum of average for image index 1
-            image_sum_2   = np.nansum(temporary_matrix[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc], slc, dif, image_index_2])                                                               # Take the total pixel sum of average for image index 2
-            if image_sum_1 > image_sum_2:                                                                                                                   # If the total pixel sum of average for image index 1 is greater ...
-                expiration_index  = image_index_2                                                                                                               # Expiration index is defined as the average for image index 2
-                inspiration_index = image_index_1                                                                                                               # Inspiration index is defined as the average for image index 1
-            if image_sum_1 < image_sum_2:                                                                                                                   # If the total pixel sum of average for image index 2 is greater ...
-                expiration_index  = image_index_1                                                                                                               # Expiration index is defined as the average for image index 1
-                inspiration_index = image_index_2                                                                                                               # Inspiration index is defined as the average for image index 2
-            if image_sum_1 == image_sum_2:                                                                                                                  # If the total pixel sum of average for image index 1 and 2 are the same ...
-                print('For diffusion direction %i on slice %i, no respiratory differences identified. ' %(dif, slc))                                            # Print warning that data is the same
-                expiration_index  = image_index_1                                                                                                               # Expiration index is defined as the average for image index 1
-                inspiration_index = image_index_2                                                                                                               # Inspiration index is defined as the average for image index 2
-            expiration_to_inspiration       = SSIM[expiration_index, :, dif, slc].tolist()                                                                  # Create expiration to inspiration list with expiration index
-            expiration_to_inspiration_index = np.flip(np.argsort(expiration_to_inspiration))                                                                # Reverse sort expiration to inspiration list to start with expiration average
-            for avg in range(averages):                                                                                                                     # Iterate through averages
-                respiratory_matrix[:, :, slc, dif, avg] = original_matrix[:, :, slc, dif, expiration_to_inspiration_index[avg]]                                 # Store original matrix averages using the expiration to inspiration list
+    # Rejection represents unavailable shots as NaN. Never pass these shots
+    # into PCA or entropy, and retain their original values at the output tail.
+    available = np.isfinite(temporary_matrix).all(axis=(0, 1))
+    for slc in range(slices):
+        if x_end[slc] - x_start[slc] < 7 or y_end[slc] - y_start[slc] < 7:
+            raise ValueError('Respiratory sorting requires a crop at least 7 x 7 pixels per slice.')
+    if available.all():
+        denoised_matrix, _, _ = denoise(temporary_matrix, original_bvals, original_bvecs,
+                                        denoising_algorithm='LocalPCA')
+    else:
+        denoised_matrix = np.zeros_like(temporary_matrix, dtype=float)
+        for slc in range(slices):
+            # Keep all available encodings together for PCA, with their actual
+            # b-values and vectors, even when repetition counts differ.
+            indices = np.argwhere(available[slc])
+            if not len(indices):
+                continue
+            images = np.stack([temporary_matrix[:, :, slc, dif, avg]
+                               for dif, avg in indices], axis=2)
+            if len(indices) == 1:
+                cleaned = images
+            else:
+                cleaned, _, _ = denoise(
+                    images[:, :, None, :, None],
+                    np.asarray(original_bvals)[indices[:, 0]],
+                    np.asarray(original_bvecs)[indices[:, 0]],
+                    denoising_algorithm='LocalPCA')
+                cleaned = cleaned[:, :, 0, :, 0]
+            for index, (dif, avg) in enumerate(indices):
+                denoised_matrix[:, :, slc, dif, avg] = cleaned[:, :, index]
+
+    from skimage.util import img_as_ubyte
+    entropy_matrix = np.zeros(temporary_matrix.shape)
+    for slc, dif, avg in np.argwhere(available):
+        image = denoised_matrix[:, :, slc, dif, avg]
+        high = image.max()
+        normalized = np.clip(image / high, 0, 1) if high > 0 else np.zeros_like(image)
+        entropy_matrix[:, :, slc, dif, avg] = entropy(img_as_ubyte(normalized), disk(7))
+
+    for dif in range(directions):
+        for slc in range(slices):
+            good = np.flatnonzero(available[slc, dif])
+            missing = np.flatnonzero(~available[slc, dif])
+            order = good
+            if len(good) > 1:
+                roi = np.s_[y_start[slc]:y_end[slc], x_start[slc]:x_end[slc]]
+                features = entropy_matrix[:, :, slc, dif, :][roi][:, :, good]
+                similarity = np.eye(len(good))
+                errors = np.zeros_like(similarity)
+                for i in range(len(good)):
+                    for j in range(i + 1, len(good)):
+                        similarity[i, j] = similarity[j, i] = np.round(
+                            ssim(features[:, :, i], features[:, :, j], data_range=2.0), 2)
+                        errors[i, j] = errors[j, i] = np.round(
+                            np.sqrt(mse(features[:, :, i], features[:, :, j])), 2)
+                # Choose distinct endpoints. With identical/blank images the
+                # old tie handling could select a diagonal or index past a pair.
+                left, right = np.triu_indices(len(good), k=1)
+                scores = similarity[left, right]
+                candidates = np.flatnonzero(scores == scores.min())
+                pair = candidates[np.argmax(errors[left[candidates], right[candidates]])]
+                first, second = left[pair], right[pair]
+                sums = [np.sum(temporary_matrix[:, :, slc, dif, good[i]][roi])
+                        for i in (first, second)]
+                expiration = first if sums[0] <= sums[1] else second
+                order = good[np.argsort(-similarity[expiration], kind='stable')]
+            for avg, source in enumerate(np.concatenate((order, missing))):
+                respiratory_matrix[:, :, slc, dif, avg] = original_matrix[:, :, slc, dif, source]
     ########## Tie-up-loose-ends ... ##############################################################################################################
     respiratory_bvals = original_bvals                                                                                                              # Store b-value information
     respiratory_bvecs = original_bvecs                                                                                                              # Store b-vector information

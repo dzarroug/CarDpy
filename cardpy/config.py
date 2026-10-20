@@ -29,6 +29,9 @@ DEFAULT_CONFIG = {
     ### ---- Shot rejection ----
     "rejection": {
         "enabled":        True,
+        # Set True to review automatic keep/reject decisions before respiratory sorting.
+        # Click thumbnails to toggle (green = keep, red = reject); Apply slice and continue.
+        "manual_review":  False,  # requires rejection.enabled=True; use saved_configuration_mode="off" for a fresh run
         "nrmse_threshold": 0.75,
         "nssim_threshold": 0.75,
         "zoom":           "ON",
