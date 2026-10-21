@@ -8,3 +8,7 @@ __pycache__/
 dist/
 build/
 __pycache__/
+rejection_labels*.csv
+PURL_data/
+ml_rejection/cache/
+ml_rejection/models/
