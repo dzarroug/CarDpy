@@ -30,7 +30,10 @@ DEFAULT_CONFIG = {
     "rejection": {
         "enabled":        True,
         "mode":           "algorithm",  # "algorithm" / "manual" / "ml"
-        "manual_review":  False,        # algorithm or ml: review/edit the picks in the GUI
+        # Set True to review automatic keep/reject decisions before respiratory sorting.
+        # Click thumbnails to toggle (green = keep, red = reject); Apply slice and continue.
+        # Works with mode "algorithm" or "ml"; mode "manual" always opens the review.
+        "manual_review":  False,  # requires rejection.enabled=True; use saved_configuration_mode="off" for a fresh run
         "ml_model_path":  None,         # path to best.pt (ml mode)
         "ml_threshold":   None,         # None = threshold saved with the model
         "nrmse_threshold": 0.75,
