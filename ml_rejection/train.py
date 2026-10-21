@@ -3,7 +3,9 @@ train.py
 Small CNN that classifies each image accept (0) / reject (1).
 
   python ml_rejection/train.py              # train, pick best epoch + threshold on VAL
+  python ml_rejection/train.py --crop 64    # same, on a centered 64x64 window around the heart
   python ml_rejection/train.py --test       # evaluate the saved model on TEST (run once, at the end)
+Each run saves to models/<run name>/ (default: full or crop64), so runs don't overwrite each other.
 
 Design (kept deliberately simple and defensible):
   - input: C x 128 x 128 from dataset.py (C read from the cache; currently 3:
@@ -81,15 +83,22 @@ def best_threshold(p, y):
     return float(thr[i])
 
 
+def run_dir(args):
+    name = args.name or (f"crop{args.crop}" if args.crop else "full")
+    return os.path.join(MODELS, name)
+
+
 def train(args):
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     dev = device()
-    train_dl, val_dl, _, pos_weight = get_loaders(batch_size=args.batch_size)
+    train_dl, val_dl, _, pos_weight = get_loaders(batch_size=args.batch_size, crop=args.crop)
     model = RejectionCNN(in_ch=train_dl.dataset.X.shape[1]).to(dev)
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight.to(dev))
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
-    os.makedirs(MODELS, exist_ok=True)
+    out = run_dir(args)
+    os.makedirs(out, exist_ok=True)
+    print(f"run {out}")
     print(f"device {dev} | train {len(train_dl.dataset)} | val {len(val_dl.dataset)} | "
           f"pos_weight {pos_weight.item():.1f} | params {sum(p.numel() for p in model.parameters()):,}")
 
@@ -111,7 +120,7 @@ def train(args):
         row = dict(epoch=epoch, train_loss=total / len(train_dl.dataset), val_ap=ap, thr=thr, **m,
                    secs=time.time() - t0)
         history.append(row)
-        pd.DataFrame(history).to_csv(os.path.join(MODELS, "history.csv"), index=False)
+        pd.DataFrame(history).to_csv(os.path.join(out, "history.csv"), index=False)
         print(f"epoch {epoch:2d} | loss {row['train_loss']:.4f} | val AP {ap:.3f} | "
               f"F1 {m['f1']:.3f} (P {m['precision']:.3f} R {m['recall']:.3f} @ {thr:.2f}) | "
               f"{row['secs']:.0f}s")
@@ -120,14 +129,14 @@ def train(args):
             best_ap, stale = ap, 0
             torch.save(dict(state_dict=model.state_dict(), threshold=thr, epoch=epoch,
                             val_ap=ap, val_metrics=m, args=vars(args)),
-                       os.path.join(MODELS, "best.pt"))
+                       os.path.join(out, "best.pt"))
         else:
             stale += 1
             if stale >= args.patience:
                 print(f"early stop: no val AP gain for {args.patience} epochs")
                 break
 
-    ck = torch.load(os.path.join(MODELS, "best.pt"), map_location="cpu", weights_only=False)
+    ck = torch.load(os.path.join(out, "best.pt"), map_location="cpu", weights_only=False)
     print(f"\nbest epoch {ck['epoch']} | val AP {ck['val_ap']:.3f} | threshold {ck['threshold']:.2f} | "
           f"val F1 {ck['val_metrics']['f1']:.3f} P {ck['val_metrics']['precision']:.3f} "
           f"R {ck['val_metrics']['recall']:.3f}")
@@ -135,8 +144,10 @@ def train(args):
 
 def test(args):
     dev = device()
-    _, _, test_dl, _ = get_loaders(batch_size=args.batch_size)
-    ck = torch.load(os.path.join(MODELS, "best.pt"), map_location="cpu", weights_only=False)
+    out = run_dir(args)
+    ck = torch.load(os.path.join(out, "best.pt"), map_location="cpu", weights_only=False)
+    crop = ck["args"].get("crop")
+    _, _, test_dl, _ = get_loaders(batch_size=args.batch_size, crop=crop)
     model = RejectionCNN(in_ch=test_dl.dataset.X.shape[1]).to(dev); model.load_state_dict(ck["state_dict"])
     p, y = predict(model, test_dl, dev)
     m = metrics_at(p, y, ck["threshold"])
@@ -145,7 +156,7 @@ def test(args):
     print(f"F1 {m['f1']:.3f} | precision {m['precision']:.3f} | recall {m['recall']:.3f}")
     print(f"confusion: TP {m['tp']}  FP {m['fp']}  FN {m['fn']}  TN {m['tn']}")
     meta = test_dl.dataset.meta.copy(); meta["prob"] = p; meta["pred"] = (p >= ck["threshold"]).astype(int)
-    meta.to_csv(os.path.join(MODELS, "test_predictions.csv"), index=False)
+    meta.to_csv(os.path.join(out, "test_predictions.csv"), index=False)
 
 
 if __name__ == "__main__":
@@ -155,6 +166,8 @@ if __name__ == "__main__":
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--patience", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--crop", type=int, default=None, help="centered crop size, e.g. 64")
+    ap.add_argument("--name", default=None, help="run folder name under models/")
     ap.add_argument("--test", action="store_true")
     args = ap.parse_args()
     test(args) if args.test else train(args)
