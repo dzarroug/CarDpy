@@ -12,7 +12,7 @@ All channels are scaled by the 99th percentile of ch1, so relative intensity
 (e.g. signal dropout vs. reference) is preserved.
 
 Ambiguous rows are dropped here. Split is by PARTICIPANT (both blips of a
-participant always land in the same split) with a fixed seed.
+participant always go in the same split) with a fixed seed.
 
 Usage:
     python ml_rejection/build_cache.py PURL_data rejection_labels.csv

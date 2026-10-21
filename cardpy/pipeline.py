@@ -265,7 +265,10 @@ def process(study_root, config, save=True):
             operation_type=op, diagnostics_path=out_path, gui_version=gui_version,
             save_diagnostics=save and config.get("output", {}).get("save_diagnostics", True),
             manual_review=r.get("manual_review", False),
-            saved_configuration_mode=saved_mode)
+            saved_configuration_mode=saved_mode, rejection_mode=r.get("mode", "algorithm"),
+            ml_model_path=r.get("ml_model_path"),
+            ml_threshold=r.get("ml_threshold"),
+            ml_input=m)
         if gui_version == 'v2' and len(Slice_Coordinates) == 4:
             segmentation_crop = Slice_Coordinates
             crop_shape = m2.shape[:2]

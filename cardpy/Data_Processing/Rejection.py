@@ -47,7 +47,7 @@ def _apply_sorted_keep(matrix, keep):
     return accepted
 
 
-def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off"):
+def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON',IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off", rejection_mode = 'algorithm', ml_model_path = None, ml_threshold = None, ml_input = None): 
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
@@ -198,6 +198,40 @@ def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thresh
         return _rejection_result(original_matrix, original_bvals, original_bvecs,
                                  dictionary_items, original_bvecs_stacked,
                                  coordinates, final_keep, operation_type)
+    
+       ########## Rejection mode: manual / ml (algorithm mode continues below unchanged) ##########
+    if rejection_mode not in ('algorithm', 'manual', 'ml'):
+        raise ValueError("rejection_mode must be 'algorithm', 'manual', or 'ml'.")
+    if rejection_mode != 'algorithm':
+        if dictionary_input:
+            raise NotImplementedError("rejection_mode '%s' does not support dictionary input yet." % rejection_mode)
+        n_rows, n_cols, n_slc, n_vol = original_matrix_stacked.shape
+        Slice_Crop_Coordinates = [[0] * n_slc, [n_cols] * n_slc, [0] * n_slc, [n_rows] * n_slc]
+        if rejection_mode == 'ml':
+            from cardpy.Data_Processing.ML_Rejection import ml_keep_matrix
+            ml_source = temporary_matrix
+            if ml_input is not None:   # unregistered images, matching training data
+                ml_source = np.abs(sorted2stacked(ml_input, original_bvals, original_bvecs)[0])
+            automatic_keep, _ = ml_keep_matrix(ml_source, original_bvals_stacked, original_bvecs_stacked,
+                                               model_path=ml_model_path, threshold=ml_threshold,
+                                               save_dir=_diag_dir if save_diagnostics else None)
+        else:   # manual: every image starts as KEEP, user decides
+            automatic_keep = np.ones((n_slc, n_vol), dtype=np.uint8)
+        keep_matrix_stacked = automatic_keep.copy()
+        if rejection_mode == 'manual' or manual_review:
+            keep_matrix_stacked = _manual_rejection_review(
+                original_matrix_stacked, automatic_keep, diagnostics_path=diagnostics_path,
+                bvals=original_bvals_stacked, bvecs=original_bvecs_stacked,
+                save_decisions=save_diagnostics)
+        if save_diagnostics:
+            _save_rejection_configuration(_diag_dir, original_matrix_stacked,
+                                          original_bvals_stacked, original_bvecs_stacked,
+                                          Slice_Crop_Coordinates, automatic_keep,
+                                          keep_matrix_stacked, operation_type)
+        return _rejection_result(original_matrix, original_bvals, original_bvecs,
+                                 dictionary_items, original_bvecs_stacked,
+                                 Slice_Crop_Coordinates, keep_matrix_stacked, operation_type)
+    
     ########## ROI Cropping for Image #############################################################################################################
     slices                 = original_matrix_stacked.shape[2]                                                                      #
     Slice_Crop_Coordinates = []                                                                                             #
@@ -593,7 +627,12 @@ def _rejection_result(original_matrix, original_bvals, original_bvecs, dictionar
 
 def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
                              bvecs=None, save_decisions=True, initial_keep=None):
-    """Open a native Tk window for each slice; click a tile to toggle its decision."""
+    """Open a native Tk window for each slice; click a tile to toggle its decision.
+
+    Zoom: the slider zooms toward the image center; 'Choose zoom region' lets the
+    user drag a box on an enlarged overview so every tile shows that region.
+    The chosen region carries over to later slices until reset.
+    """
     import base64
     import math
     import json
@@ -609,6 +648,7 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
     keep = automatic_keep.copy() if initial_keep is None else np.asarray(initial_keep, dtype=np.uint8).copy()
     n_slices, n_images = keep.shape
     columns = min(6, max(1, n_images))
+    zoom_box = {'bounds': None}   # (y0, y1, x0, x1) in image pixels; persists across slices
     for slc in range(n_slices):
         window = create_window(f'CarDpy: Manual shot rejection — slice {slc + 1}/{n_slices}')
         window.geometry('1120x820')
@@ -622,9 +662,13 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
 
         zoom_bar = ttk.Frame(window, padding=(10, 0, 10, 6))
         zoom_bar.grid(row=1, column=0, sticky='ew')
-        ttk.Label(zoom_bar, text='Global zoom').pack(side='left', padx=(0, 8))
+        ttk.Label(zoom_bar, text='Center zoom').pack(side='left', padx=(0, 8))
+        ttk.Button(zoom_bar, text='Choose zoom region…',
+                   command=lambda: choose_region()).pack(side='left', padx=4)
+        ttk.Button(zoom_bar, text='Reset zoom',
+                   command=lambda: reset_zoom()).pack(side='left', padx=4)
         zoom_value = tk.DoubleVar(value=1.0)
-        zoom_label = ttk.Label(zoom_bar, text='100%', width=6, anchor='e')
+        zoom_label = ttk.Label(zoom_bar, text='100%', width=10, anchor='e')
         zoom_label.pack(side='right', padx=(8, 0))
         zoom_scale = ttk.Scale(zoom_bar, from_=1.0, to=4.0, variable=zoom_value,
                                orient='horizontal', length=300)
@@ -740,26 +784,112 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
                    + png_chunk(b'IEND', b''))
             return tk.PhotoImage(data=base64.b64encode(png).decode('ascii'), format='png')
 
-        def refresh_tiles(value=None):
+        def to_gray(array):
+            high = max(maximum_value.get(), np.finfo(float).eps)
+            shown = np.clip(array / high, 0, 1)
+            return np.asarray(np.round(np.nan_to_num(shown, nan=0.0) * 255), dtype=np.uint8)
+
+        def zoom_window(shape):
+            """Return (y0, y1, x0, x1) of the region every tile shows."""
+            h, w = shape
+            box = zoom_box['bounds']
+            if box is not None:
+                y0, y1, x0, x1 = box
+                y0, x0 = max(0, min(y0, h - 1)), max(0, min(x0, w - 1))
+                y1, x1 = max(y0 + 1, min(y1, h)), max(x0 + 1, min(x1, w))
+                return y0, y1, x0, x1
             zoom = float(zoom_value.get())
-            zoom_label.configure(text=f'{zoom:.0%}')
+            crop_h = max(1, int(round(h / zoom)))
+            crop_w = max(1, int(round(w / zoom)))
+            y0 = (h - crop_h) // 2
+            x0 = (w - crop_w) // 2
+            return y0, y0 + crop_h, x0, x0 + crop_w
+
+        def refresh_tiles(value=None):
+            if zoom_box['bounds'] is None:
+                zoom_label.configure(text=f'{float(zoom_value.get()):.0%}')
+            else:
+                y0, y1, x0, x1 = zoom_box['bounds']
+                zoom_label.configure(text=f'region {x1 - x0}×{y1 - y0}')
             for index, (tile, picture, status, _) in enumerate(tile_widgets):
                 scaled = magnitude_images[index]
-                out_h, out_w = min(132, scaled.shape[0]), min(160, scaled.shape[1])
-                crop_h = max(1, int(round(scaled.shape[0] / zoom)))
-                crop_w = max(1, int(round(scaled.shape[1] / zoom)))
-                y0 = (scaled.shape[0] - crop_h) // 2
-                x0 = (scaled.shape[1] - crop_w) // 2
-                crop = scaled[y0:y0 + crop_h, x0:x0 + crop_w]
+                y0, y1, x0, x1 = zoom_window(scaled.shape)
+                crop = scaled[y0:y1, x0:x1]
+                # Fit the region into a 160 x 132 tile, keeping its aspect ratio.
+                fit = min(160 / crop.shape[1], 132 / crop.shape[0])
+                out_h = max(1, int(round(crop.shape[0] * fit)))
+                out_w = max(1, int(round(crop.shape[1] * fit)))
                 ys = np.linspace(0, crop.shape[0] - 1, out_h).astype(int)
                 xs = np.linspace(0, crop.shape[1] - 1, out_w).astype(int)
-                high = max(maximum_value.get(), np.finfo(float).eps)
-                shown = np.clip(crop[np.ix_(ys, xs)] / high, 0, 1)
-                gray = np.asarray(np.round(np.nan_to_num(shown, nan=0.0) * 255), dtype=np.uint8)
-                image_refs[index] = png_photo(gray)
+                image_refs[index] = png_photo(to_gray(crop[np.ix_(ys, xs)]))
                 picture.configure(image=image_refs[index])
 
-        zoom_scale.configure(command=refresh_tiles)
+        def slider_zoom(value=None):
+            zoom_box['bounds'] = None          # moving the slider returns to center zoom
+            refresh_tiles()
+
+        zoom_scale.configure(command=slider_zoom)
+
+        def reset_zoom():
+            zoom_box['bounds'] = None
+            zoom_value.set(1.0)
+            refresh_tiles()
+
+        def choose_region():
+            """Enlarged overview of this slice; drag a box to set the zoom region."""
+            stack = np.stack(magnitude_images, axis=2)
+            overview = np.max(np.where(np.isfinite(stack), stack, 0), axis=2)
+            h, w = overview.shape
+            k = max(1, 512 // max(h, w))                      # integer upscale for display
+            big = np.repeat(np.repeat(to_gray(overview), k, axis=0), k, axis=1)
+
+            top = tk.Toplevel(window)
+            top.title(f'Choose zoom region — slice {slc + 1}')
+            top.transient(window)
+            ttk.Label(top, text='Drag a box around the region to zoom into, then release.',
+                      padding=8).pack()
+            board = tk.Canvas(top, width=w * k, height=h * k, highlightthickness=0, cursor='crosshair')
+            board.pack(padx=8, pady=(0, 8))
+            photo = png_photo(big)
+            board.create_image(0, 0, image=photo, anchor='nw')
+            board.image = photo
+            if zoom_box['bounds'] is not None:
+                y0, y1, x0, x1 = zoom_box['bounds']
+                board.create_rectangle(x0 * k, y0 * k, x1 * k, y1 * k, outline='#61ba86', dash=(4, 2))
+            drag = {'start': None, 'rect': None}
+
+            def press(event):
+                drag['start'] = (event.x, event.y)
+                if drag['rect'] is not None:
+                    board.delete(drag['rect'])
+                drag['rect'] = board.create_rectangle(event.x, event.y, event.x, event.y,
+                                                      outline='#61ba86', width=2)
+
+            def motion(event):
+                if drag['start'] is not None:
+                    sx, sy = drag['start']
+                    board.coords(drag['rect'], sx, sy, event.x, event.y)
+
+            def release(event):
+                if drag['start'] is None:
+                    return
+                sx, sy = drag['start']
+                x0, x1 = sorted((int(sx // k), int(math.ceil(event.x / k))))
+                y0, y1 = sorted((int(sy // k), int(math.ceil(event.y / k))))
+                x0, y0 = max(0, x0), max(0, y0)
+                x1, y1 = min(w, x1), min(h, y1)
+                drag['start'] = None
+                if x1 - x0 < 4 or y1 - y0 < 4:      # ignore accidental clicks
+                    return
+                zoom_box['bounds'] = (y0, y1, x0, x1)
+                top.destroy()
+                refresh_tiles()
+
+            board.bind('<ButtonPress-1>', press)
+            board.bind('<B1-Motion>', motion)
+            board.bind('<ButtonRelease-1>', release)
+            ttk.Button(top, text='Cancel', command=top.destroy).pack(pady=(0, 8))
+            top.grab_set()
 
         def redraw():
             for tile, picture, status, index in tile_widgets:
