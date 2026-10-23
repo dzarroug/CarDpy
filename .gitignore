@@ -12,3 +12,6 @@ rejection_labels*.csv
 PURL_data/
 ml_rejection/cache/
 ml_rejection/models/
+PURL_test_raw/
+ml_rejection/figures/
+rejection_comparison*/

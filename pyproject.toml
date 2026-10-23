@@ -39,4 +39,4 @@ where = ["."]
 include = ["cardpy*"]
 
 [tool.setuptools.package-data]
-cardpy = ["Colormaps_data/*.txt"]
+cardpy = ["Colormaps_data/*.txt", "Data_Processing/models/*.pt"]
