@@ -3,6 +3,7 @@ import warnings
 import json
 import numpy as np
 from cardpy.workflow_state import write_processing_status
+from cardpy.shot_metadata import ShotMetadata
 
 warnings.filterwarnings('ignore', module='dipy')
 warnings.filterwarnings('ignore', module='sklearn')
@@ -22,7 +23,7 @@ from cardpy.Data_Saving                           import (Save_Diffusion_Image_D
 from cardpy.Data_Processing.Gibbs                 import unrung
 from cardpy.Data_Processing.Registration          import register
 from cardpy.Data_Processing.Rejection             import shot_rejection
-from cardpy.Data_Processing.Respiratory           import respiratory_sorting
+from cardpy.Data_Processing.Respiratory           import respiratory_sorting, prepare_respiratory_crop
 from cardpy.Data_Processing.Diffusivity           import ADC_Filter
 from cardpy.Data_Processing.Averaging             import average, remove_background_phase
 from cardpy.Data_Processing.Denoising             import denoise
@@ -145,6 +146,12 @@ def _load(study_root, config):
             os.path.join(nifti_dir, "data.bvals"),
             os.path.join(nifti_dir, "data.bvecs"),
             os.path.join(nifti_dir, "data.header"))
+        shot_path = os.path.join(nifti_dir, 'data.shots.json')
+        if os.path.isfile(shot_path):
+            with open(shot_path) as f:
+                metadata = json.load(f)
+            Header['_Shot Metadata'] = metadata['shots']
+            Header['_Acquisition Metadata'] = metadata.get('acquisition', {})
 
     if config["slice_index"] is not None:
         indices = np.asarray(config["slice_index"])
@@ -194,6 +201,12 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     if saved_mode != 'off':
         gui['reuse_existing_segmentation'] = True
         gui['segmentation_review'] = saved_mode == 'review'
+    segmentation_saved_mode = gui.get('segmentation_saved_configuration_mode')
+    if segmentation_saved_mode is not None:
+        if segmentation_saved_mode not in ('off', 'reuse', 'review'):
+            raise ValueError('Invalid segmentation_saved_configuration_mode.')
+        gui['reuse_existing_segmentation'] = segmentation_saved_mode != 'off'
+        gui['segmentation_review'] = segmentation_saved_mode == 'review'
 
     gui_version = gui.get("version", "legacy")
     scan_name = gui.get("scan_name") or os.path.basename(os.path.normpath(out_path))
@@ -206,6 +219,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     crop_shape = None
 
     counter = {"n": -1}
+    shot_metadata = None
     def _save_stage(name, mm, bb, vv, Header, folder_name=None):
         if not save:
             return
@@ -213,11 +227,22 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         folder      = str(counter["n"]).zfill(2) + '_' + (folder_name if folder_name is not None else name)
         output_path = os.path.join(out_path, folder)
         os.makedirs(output_path, exist_ok=True)
+        if shot_metadata is not None and name != 'Extended_Matrix':
+            shot_metadata.save(os.path.join(output_path, name + '.shots.json'), mm, bb, vv, Header)
+        elif shot_metadata is not None:
+            Header['Shot Metadata File'] = name + '.shots.json'
+            with open(os.path.join(output_path, name + '.shots.json'), 'w') as f:
+                json.dump({'schema_version': 1, 'derived_segmentation_maps': True,
+                           'source_metadata': '../' + previous_stage['metadata']}, f, indent=2)
+        if shot_metadata is not None and name != 'Extended_Matrix':
+            previous_stage['metadata'] = folder + '/' + name + '.shots.json'
         Save_Diffusion_Image_Data(output_path, name, Header, mm, bb, vv)
 
+    previous_stage = {}
     # ----- Load + sort -----
     matrix_stacked, bvals_stacked, bvecs_stacked, Header = (
         _load(study_root, config) if input_data is None else input_data)
+    Header = dict(Header)
     print('Loaded matrix shape:', matrix_stacked.shape, '| b-values:', bvals_stacked.shape, '| b-vectors:', bvecs_stacked.shape)
     input_encodings = stacked2dictionary(matrix_stacked, bvals_stacked, bvecs_stacked)
     repetition_counts = [encoding['images'].shape[3] for encoding in input_encodings.values()]
@@ -239,6 +264,9 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         m, b, v = dictionary2sorted(input_encodings, mode='individual')
     else:
         m, b, v = dictionary2sorted(input_encodings)
+    if '_Shot Metadata' in Header:
+        shot_metadata = ShotMetadata(Header['_Shot Metadata'], bvals_stacked, bvecs_stacked,
+                                     m.shape[2], individual=dictionary_processing)
     if reg_mode == '3D' and m.shape[2] < 2:
         raise ValueError('3D registration requires multiple contiguous slices; use 2D for a single slice.')
     input_shape = m.shape[:3]
@@ -272,7 +300,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             operation_type=op, diagnostics_path=out_path, gui_version=gui_version,
             save_diagnostics=save and config.get("output", {}).get("save_diagnostics", True),
             manual_review=r.get("manual_review", False),
-            saved_configuration_mode=saved_mode, rejection_mode=r.get("mode", "algorithm"),
+            saved_configuration_mode=r.get('saved_configuration_mode', saved_mode), rejection_mode=r.get("mode", "algorithm"),
             ml_model_path=r.get("ml_model_path"),
             ml_threshold=r.get("ml_threshold"),
             ml_input=m)
@@ -281,6 +309,8 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             crop_shape = m2.shape[:2]
         if dictionary_processing:
             m, b, v = dictionary2sorted(m, mode='individual')
+        if shot_metadata is not None:
+            shot_metadata.reject(keep, b2, v2)
         _save_stage('Rejected', m, b, v, Header)
         if save:
             diag_dir = os.path.join(out_path, '13_Diagnostics')
@@ -342,30 +372,43 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             print('Aligning input images.')
             m2, b2, v2 = register(m, b, v, **register_options)
             aligned = True
+        respiratory_crop = rs.get('crop_coordinates')
+        if respiratory_crop is None and rs['zoom'] == 'ON' and rs['interact_zoom'] == 'ON':
+            respiratory_crop = prepare_respiratory_crop(
+                m2, b2, v2, out_path, organ=rs['organ'], gui_version=gui_version,
+                saved_configuration_mode=saved_mode, save=save)
         if dictionary_processing:
             encodings = sorted2dictionary(m2, b2, v2)
-            respiratory_crop = rs.get('crop_coordinates')
-            for encoding in encodings.values():
+            metadata_encodings = shot_metadata.regroup(b2, v2) if shot_metadata is not None else None
+            for key, encoding in encodings.items():
                 if encoding['images'].shape[3] < 2:
                     continue
-                ordered, _, _, respiratory_crop = respiratory_sorting(
+                result = respiratory_sorting(
                     encoding['images'][:, :, :, np.newaxis, :],
                     np.asarray([encoding['bval']]), np.asarray([encoding['bvec']]),
                     zoom=rs["zoom"], IntERACT_zoom=rs["interact_zoom"],
                     organ=rs["organ"], operation_type=op, gui_version=gui_version,
-                    crop_coordinates=respiratory_crop)
+                    crop_coordinates=respiratory_crop, return_order=shot_metadata is not None)
+                ordered, _, _, respiratory_crop = result[:4]
+                if shot_metadata is not None:
+                    ids = metadata_encodings[key]['images']
+                    for slc in range(ids.shape[2]):
+                        old = ids[0, 0, slc].copy()
+                        order = result[4][slc, 0]
+                        ids[0, 0, slc] = [old[i] if i >= 0 else -1 for i in order]
                 encoding['images'] = ordered[:, :, :, 0, :]
             m, b, v = dictionary2sorted(encodings, mode='individual')
+            if shot_metadata is not None:
+                shot_metadata.from_encodings(metadata_encodings)
         else:
-            m, b, v, respiratory_crop = respiratory_sorting(m2, b2, v2, zoom=rs["zoom"],
+            result = respiratory_sorting(m2, b2, v2, zoom=rs["zoom"],
                                              IntERACT_zoom=rs["interact_zoom"], organ=rs["organ"],
                                              operation_type=op, gui_version=gui_version,
-                                             crop_coordinates=rs.get('crop_coordinates'))
-        if save and respiratory_crop is not None:
-            diagnostics = os.path.join(out_path, '13_Diagnostics')
-            os.makedirs(diagnostics, exist_ok=True)
-            with open(os.path.join(diagnostics, 'Respiratory_Crop.json'), 'w') as stream:
-                json.dump(np.asarray(respiratory_crop).tolist(), stream)
+                                             crop_coordinates=respiratory_crop,
+                                             return_order=shot_metadata is not None)
+            m, b, v, _ = result[:4]
+            if shot_metadata is not None:
+                shot_metadata.reorder(result[4])
         _save_stage('Respiratory_Ordered', m, b, v, Header, folder_name='Respiratory_Sorted')
 
     # ----- Registration (standalone) -----
@@ -394,6 +437,8 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     # ----- Averaging (register after) -----
     if config["averaging"]["enabled"]:
         print('Averaging mode is on.')
+        if shot_metadata is not None:
+            shot_metadata.average(m, b, v, individual=dictionary_processing)
         if dictionary_processing:
             m, b, v = dictionary2sorted(sorted2dictionary(m, b, v),
                                          mode='average', operation_type=op, phase_corrected=op == 'Complex')
@@ -455,6 +500,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     # ===== Contouring =====
     endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
     saved_segmentation = None
+    segmentation_bounds = []
     segmentation_json = gui.get("segmentation_json")
     if not segmentation_json and gui.get('reuse_existing_segmentation', False):
         candidate = os.path.join(out_path, '11_Segmentation', 'Segmentation.json')
@@ -481,6 +527,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         MD       = Standard_DTI_Metrics['MD'][:, :, slc]
         E1       = Eigenvectors['E1'][:, :, slc, :]
         initial_contours = None
+        bounds = None
         if saved_segmentation is not None:
             c = saved_segmentation["contours"]
             ex = (np.asarray(c["endo_x"][slc][0]) * scale_x).tolist()
@@ -493,16 +540,21 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
                 'endo': np.column_stack((ex, ey)), 'epi': np.column_stack((px, py)),
                 'antRVIP': np.asarray(aRV)[None, :], 'infRVIP': np.asarray(iRV)[None, :],
             }
+            saved_crops = saved_segmentation.get("crop_bounds")
+            if saved_crops and saved_crops[slc] is not None:
+                from cardpy.GUI_Tools._image_controls import scale_crop
+                bounds = scale_crop(saved_crops[slc], source_shape, m.shape[:2])
         if saved_segmentation is None or review_segmentation:
-            bounds = None
-            if gui.get("segmentation_zoom", True) and segmentation_crop is not None:
+            if gui.get("segmentation_zoom", True) and bounds is None and segmentation_crop is not None:
                 from cardpy.GUI_Tools._image_controls import scale_crop
                 bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
                                     crop_shape, m.shape[:2])
-            ex, ey, px, py, aRV, iRV = New_GUI(
+            contour_result, bounds = New_GUI(
                 avg_diff, MD, E1, gui_version=gui_version, crop_bounds=bounds,
                 md_max=gui.get("md_max", 3.0), point_size=gui.get("point_size", 8.0),
-                scan_name=scan_name, initial_contours=initial_contours)
+                scan_name=scan_name, initial_contours=initial_contours, return_crop=True)
+            ex, ey, px, py, aRV, iRV = contour_result
+        segmentation_bounds.append(bounds)
         endo_x.append([ex]); endo_y.append([ey]); epi_x.append([px])
         epi_y.append([py]); antRVIP.append([aRV]); infRVIP.append([iRV])
 
@@ -522,7 +574,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         segmentation_data = {"image_shape": list(m.shape[:2]),
                              "voxel_spacing": [float(Header.get(axis + ' Resolution', 1.0)) for axis in ('X', 'Y', 'Z')],
                              "slice_index": list(range(m.shape[2])),
-                             "crop_bounds": None,
+                             "crop_bounds": segmentation_bounds,
                              "contours": {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                                           "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP}}
         with open(os.path.join(seg_path, 'Segmentation.json'), 'w', encoding='utf-8') as stream:
@@ -531,6 +583,9 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         low_x, low_y = input_shape[1] / m.shape[1], input_shape[0] / m.shape[0]
         low = json.loads(json.dumps(segmentation_data))
         low["image_shape"] = list(input_shape[:2])
+        from cardpy.GUI_Tools._image_controls import scale_crop
+        low["crop_bounds"] = [scale_crop(bounds, m.shape[:2], input_shape[:2])
+                              if bounds is not None else None for bounds in segmentation_bounds]
         low["voxel_spacing"] = [float(Header.get('X Resolution', 1.0)) / low_y,
                                  float(Header.get('Y Resolution', 1.0)) / low_x,
                                  float(Header.get('Z Resolution', 1.0))]

@@ -1,4 +1,58 @@
-def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude', gui_version = 'legacy', crop_coordinates = None):
+def prepare_respiratory_crop(matrix, bvals, bvecs, directory, organ='Stomach',
+                             gui_version='v2', saved_configuration_mode='off', save=True):
+    """Persist the respiratory ROI independently of sorting and repetition counts."""
+    import json
+    import os
+    from pathlib import Path
+    import numpy as np
+    from cardpy.Data_Sorting import sorted2stacked
+    from cardpy.GUI_Tools.IntERACT import INTERACT_GUI
+
+    path = Path(directory) / '13_Diagnostics' / 'Respiratory_Crop.json'
+    shape = list(matrix.shape[:3])
+    coordinates = None
+    if saved_configuration_mode != 'off' and path.exists():
+        payload = json.loads(path.read_text())
+        if isinstance(payload, list):
+            coordinates = payload
+        else:
+            if payload['image_shape'] != shape or payload['organ'] != organ:
+                raise ValueError('Saved respiratory crop geometry or organ does not match the input.')
+            coordinates = payload['crop_coordinates']
+
+    def validate(values):
+        bounds = np.asarray(values, dtype=float)
+        if (bounds.shape != (4, shape[2]) or not np.isfinite(bounds).all()
+                or np.any(bounds != np.floor(bounds))):
+            raise ValueError('Invalid saved respiratory crop coordinates.')
+        x0, x1, y0, y1 = bounds
+        if (np.any(x0 < 0) or np.any(y0 < 0) or np.any(x1 > shape[1])
+                or np.any(y1 > shape[0]) or np.any(x1 <= x0) or np.any(y1 <= y0)):
+            raise ValueError('Respiratory crop lies outside the input image or is empty.')
+        return bounds.astype(int).tolist()
+
+    if coordinates is not None:
+        coordinates = validate(coordinates)
+        if saved_configuration_mode == 'reuse':
+            return coordinates
+    guide, stacked_bvals, stacked_bvecs = sorted2stacked(np.nan_to_num(np.abs(matrix)), bvals, bvecs)
+    _, repetition_counts = np.unique(
+        np.column_stack((stacked_bvals, stacked_bvecs)), axis=0, return_counts=True)
+    if not np.any(repetition_counts > 1):
+        return coordinates
+    coordinates = validate(INTERACT_GUI(guide, organ, gui_version=gui_version,
+                                       initial_coordinates=coordinates))
+    if save:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps(dict(image_shape=shape, organ=organ,
+                                             crop_coordinates=coordinates), indent=2))
+        os.replace(temporary, path)
+    return coordinates
+
+
+
+def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude', gui_version = 'legacy', crop_coordinates = None, return_order = False):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -32,6 +86,7 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     from   skimage.metrics                  import structural_similarity as ssim                                                                    # Import structural similarity index from skimage module
     from   skimage.metrics                  import mean_squared_error as mse                                                                        # Import mean squared error from skimage module
     ########## Extract information about original data matrix #####################################################################################
+    shot_order = np.full(original_matrix.shape[2:], -1, dtype=int)
     directions = original_matrix.shape[3]                                                                                                           # Extract number of directions
     slices     = original_matrix.shape[2]                                                                                                           # Extract number of slices
     averages   = original_matrix.shape[4]                                                                                                           # Extract number of averages
@@ -171,9 +226,11 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
                         for i in (first, second)]
                 expiration = first if sums[0] <= sums[1] else second
                 order = good[np.argsort(-similarity[expiration], kind='stable')]
+            shot_order[slc, dif, :len(order)] = order
             for avg, source in enumerate(np.concatenate((order, missing))):
                 respiratory_matrix[:, :, slc, dif, avg] = original_matrix[:, :, slc, dif, source]
     ########## Tie-up-loose-ends ... ##############################################################################################################
     respiratory_bvals = original_bvals                                                                                                              # Store b-value information
     respiratory_bvecs = original_bvecs                                                                                                              # Store b-vector information
-    return [respiratory_matrix, respiratory_bvals, respiratory_bvecs, Slice_Crop_Coordinates]
+    result = [respiratory_matrix, respiratory_bvals, respiratory_bvecs, Slice_Crop_Coordinates]
+    return result + [shot_order] if return_order else result

@@ -8,12 +8,12 @@ from cardpy.Colormaps import cDTI_Colormaps_Generator
 cDTI_cmaps = cDTI_Colormaps_Generator()
 
 def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_bounds=None,
-            md_max=3.0, point_size=8.0, scan_name=None, initial_contours=None):
+            md_max=3.0, point_size=8.0, scan_name=None, initial_contours=None, return_crop=False):
     if gui_version == 'v2':
         from cardpy.GUI_Tools.IntERCOMS_Spline_v2 import New_GUI as responsive_gui
         return responsive_gui(avg_diff_image, ADC_image, E1_image, crop_bounds=crop_bounds,
                               md_max=md_max, point_size=point_size, scan_name=scan_name,
-                              initial_contours=initial_contours)
+                              initial_contours=initial_contours, return_crop=return_crop)
     if initial_contours is not None:
         raise ValueError('Saved segmentation review requires gui.version="v2".')
     if gui_version != 'legacy':
@@ -501,4 +501,5 @@ def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_boun
     epicardium_y   = [x[1] for x in app.epicardium_spline_data[0]]
     Anterior_RVIP  = app.Anterior_RVIP
     Inferior_RVIP  = app.Inferior_RVIP
-    return[endocardium_x, endocardium_y, epicardium_x, epicardium_y, Anterior_RVIP, Inferior_RVIP]
+    result = [endocardium_x, endocardium_y, epicardium_x, epicardium_y, Anterior_RVIP, Inferior_RVIP]
+    return (result, None) if return_crop else result

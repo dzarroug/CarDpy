@@ -111,7 +111,23 @@ def _phoenix_gradient(dcm, acquisition_order = 1):
     if np.isnan(order):                                                                     # If no usable order was supplied ...
         order = 1                                                                               # Select the first protocol direction
     index = max(int(round(order)) - 1, 0) % len(vectors)                                   # XA61 repeats directions cyclically across averages
-    return vectors[index]                                                                   # Return the direction for this acquisition
+    vector = np.asarray(vectors[index], dtype=float)
+    # V001 nice_diff's free table is in PCS, unlike explicit DICOM LPS tags.
+    # Scope this validated conversion to its HFS protocol fallback only.
+    phoenix = []
+    for element in dcm.iterall():
+        if element.tag == (0x0021, 0x1019):
+            payload = element.value
+            phoenix.append(payload.decode('latin-1') if isinstance(payload, bytes) else str(payload))
+    import re
+    nice_diff = any(re.search(r'tSequenceFileName\s*=\s*[^\r\n]*nice_diff',
+                             payload, re.IGNORECASE) for payload in phoenix)
+    if nice_diff:
+        position = str(dcm.get('PatientPosition', '')).upper()
+        if position != 'HFS':
+            raise ValueError('nice_diff Phoenix PCS gradient conversion requires validated HFS positioning.')
+        vector *= [1., -1., -1.]
+    return vector.tolist()
 
 
 def _diffusion_b_value(dcm, frame = None, default = None):
@@ -745,7 +761,8 @@ def VendorHeaders(dcm):
             if _tag_value(dcm, 0x00101010) in (None, ''):
                 HeadersDict['Patient Age'] = ''
             else:
-                HeadersDict['Patient Age']          = [int(x) for x in dcm[0x00101010].value.split('Y') if x.isdigit()][0]                                    # Extract patient age from DICOM header
+                age_years = [int(x) for x in str(dcm[0x00101010].value).split('Y') if x.isdigit()]
+                HeadersDict['Patient Age'] = age_years[0] if age_years else ''  # Phantom age may be blank.
             HeadersDict['Patient Sex']              = _tag_value(dcm, 0x00100040, default = '')                                                               # Extract patient sex from DICOM header
             HeadersDict['Body Part']                = _tag_value(dcm, 0x00180015, default = '')                                                               # Extract examination region from DICOM header
             ########## Resolution - per frame group first, then classic tags ############################################################################
@@ -834,6 +851,8 @@ def VendorHeaders(dcm):
             b_value = _diffusion_b_value(dcm, frame = 0, default = 0)                                                                                         # Read standard/private b value or infer it from Cima series metadata
             HeadersDict['B Value'] = int(_to_float(b_value)) if not np.isnan(_to_float(b_value)) else 0                                                        # Extract b value from DICOM header
             Diff_Dir = _tag_value(dcm, 0x52009230, 0, 0x00189117, 0, 0x00189076, 0, 0x00189089)                                                                # Per-frame diffusion gradient direction
+            if Diff_Dir is None:
+                Diff_Dir = _tag_value(dcm, 0x00189089)  # Explicit classic directions are already patient LPS.
             if Diff_Dir is None:                                                                                                                             # If the interoperable export omitted the standard diffusion sequence ...
                 Diff_Dir = _tag_value(dcm, 0x0019100e)                                                                                                            # Read the Siemens classic private diffusion direction
             if Diff_Dir is None:                                                                                                                             # If XA61 omitted every per-image direction field ...
@@ -1080,14 +1099,17 @@ def Header_Reader(Header_Path):
     with open(Header_Path) as f:
         lines = f.readlines()
     HeadersDict = dict()
-    for idx in range(len(lines)):
-        key_word              = lines[idx].split(':')[0]
-        if key_word != 'Scanner Model':
-            key_value             = lines[idx].split(':')[1]
-            key_value             = key_value.strip()
-            key_value             = key_value.split(' ')[0]
-        else:
-            key_value             = lines[idx].split(':')[1]
-            key_value             = key_value.strip()
+    for line in lines:
+        key_word, separator, key_value = line.partition(':')
+        if not separator:
+            continue
+        key_word, key_value = key_word.strip(), key_value.strip()
+        # Strip measurement units without truncating multiword string fields.
+        for unit in (' ms', ' mm', ' T', ' kg', ' Hz/pixel', ' ns'):
+            if key_value.endswith(unit):
+                key_value = key_value[:-len(unit)].strip()
+                break
         HeadersDict[key_word] = key_value
+    if 'Body Part Examined' in HeadersDict:
+        HeadersDict['Body Part'] = HeadersDict['Body Part Examined']
     return HeadersDict

@@ -12,3 +12,4 @@ rejection_labels*.csv
 PURL_data/
 ml_rejection/cache/
 ml_rejection/models/
+Manual_Shot_Rejection/

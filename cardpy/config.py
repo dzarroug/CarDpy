@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
         "saved_configuration_mode": "off",  # off / reuse (no saved GUIs) / review (prefill GUIs)
         "point_size":        8.0,       # v2 marker diameter, in display points (3–20)
         "version":           "v2",  # "legacy" / "v2" (box crop + responsive contouring)
+        "segmentation_saved_configuration_mode": None,  # optional off / reuse / review override
         "segmentation_review": True,   # show saved contours for confirmation/editing (v2)
         "reuse_existing_segmentation": False,  # discover this output folder's saved JSON
         "segmentation_zoom": True,      # v2: reuse the rejection crop for contouring
