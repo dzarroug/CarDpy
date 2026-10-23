@@ -41,6 +41,7 @@ class ContourWindow:
         self.points = {stage: [] for stage in self.stages}
         self.confirmed = {stage: False for stage in self.stages}
         self.contours = {}
+        self.review_mode = initial_contours is not None
         if initial_contours is not None:
             self.load_contours(initial_contours)
         self.stage = 'epi'
@@ -75,7 +76,8 @@ class ContourWindow:
             toolbar.columnconfigure(column, weight=1)
         ttk.Style(self.window).configure('CardpyConfirm.TButton', font=('Verdana', 12, 'bold'), padding=(12, 10))
         self.confirm_button = ttk.Button(toolbar, command=self.confirm, style='CardpyConfirm.TButton')
-        self.confirm_button.grid(row=1, column=0, columnspan=2, padx=3, pady=6, sticky='ew')
+        if not self.review_mode:
+            self.confirm_button.grid(row=1, column=0, columnspan=2, padx=3, pady=6, sticky='ew')
         ttk.Button(toolbar, text='Undo edit (d)', command=self.undo).grid(row=1, column=2, padx=3, pady=3, sticky='ew')
         point_controls = ttk.Frame(toolbar)
         point_controls.grid(row=2, column=0, columnspan=4, pady=3)
@@ -118,17 +120,18 @@ class ContourWindow:
                                        values=('Magnitude', 'MD', 'Primary eigenvector'))
         self.panel_choice.current(0)
         self.panel_choice.bind('<<ComboboxSelected>>', lambda event: self.layout())
-        self.finish_button = ttk.Button(footer, text='Confirm segmentation & Finish' if initial_contours is not None else 'Save contours & Finish', command=self.finish, state='disabled')
+        self.finish_button = ttk.Button(footer, text='Save contours & Finish', command=self.finish, state='disabled')
         self.finish_button.pack(side='right')
         self.window.bind('<Configure>', self.resize)
         self.window.bind('<ButtonRelease-1>', self.release_point, add='+')
         self.set_zoom(self.initial_crop)
         self.layout()
         self.draw_points()
-        self.update_status('Saved segmentation loaded. Check alignment, drag points to adjust, or select Confirm segmentation & Finish.' if initial_contours is not None else None)
+        self.update_status('Saved segmentation loaded. Edit any contour or insertion point, then select Save contours & Finish to save all changes.' if self.review_mode else None)
 
     def load_contours(self, initial_contours):
         """Keep exact saved curves; show a manageable number of edit handles."""
+        self.review_mode = True
         for stage in self.stages:
             points = np.asarray(initial_contours[stage], dtype=float)
             minimum = 4 if stage in ('epi', 'endo') else 1
@@ -191,7 +194,9 @@ class ContourWindow:
             button.configure(text=marker + name, background=color,
                              foreground='white' if active else '#f4f1f7')
         self.confirm_button.configure(text='Confirm ' + label)
-        text = message or f'{label}: {count} point(s). Drag points to move; click to add. Confirm when ready.'
+        instruction = ('Use Save contours & Finish to save all changes.' if self.review_mode
+                       else 'Confirm when ready.')
+        text = message or f'{label}: {count} point(s). Drag points to move; click to add. {instruction}'
         self.status.configure(text=text)
         complete = self.has_complete_contours()
         self.finish_button.configure(state='normal' if complete else 'disabled')
@@ -383,11 +388,11 @@ class ContourWindow:
 
 
 def New_GUI(avg_diff_image, ADC_image, E1_image, crop_bounds=None, md_max=3.0,
-            point_size=8.0, scan_name=None, initial_contours=None):
+            point_size=8.0, scan_name=None, initial_contours=None, return_crop=False):
     app = ContourWindow(avg_diff_image, ADC_image, E1_image, bounds=crop_bounds,
                         md_max=md_max, point_size=point_size, scan_name=scan_name,
                         initial_contours=initial_contours)
     wait_window(app.window)
     if app.result is None:
         raise RuntimeError('Contour selection cancelled.')
-    return app.result
+    return (app.result, list(app.current_crop)) if return_crop else app.result

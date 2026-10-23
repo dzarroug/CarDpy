@@ -626,7 +626,8 @@ def _rejection_result(original_matrix, original_bvals, original_bvecs, dictionar
 
 
 def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
-                             bvecs=None, save_decisions=True, initial_keep=None):
+                             bvecs=None, save_decisions=True, initial_keep=None,
+                             show_automatic=True, slice_labels=None, allow_cancel=False):
     """Open a native Tk window for each slice; click a tile to toggle its decision.
 
     Zoom: the slider zooms toward the image center; 'Choose zoom region' lets the
@@ -650,13 +651,14 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
     columns = min(6, max(1, n_images))
     zoom_box = {'bounds': None}   # (y0, y1, x0, x1) in image pixels; persists across slices
     for slc in range(n_slices):
-        window = create_window(f'CarDpy: Manual shot rejection — slice {slc + 1}/{n_slices}')
+        slice_label = slice_labels[slc] if slice_labels is not None else f'{slc + 1}/{n_slices}'
+        window = create_window(f'CarDpy: Manual shot rejection — slice {slice_label}')
         window.geometry('1120x820')
         window.minsize(720, 500)
         window.columnconfigure(0, weight=1)
         window.columnconfigure(1, weight=0)
         window.rowconfigure(2, weight=1)
-        ttk.Label(window, text=f'Slice {slc + 1}: click an image to toggle keep/reject',
+        ttk.Label(window, text=f'Slice {slice_label}: click an image to toggle keep/reject',
                   font=('Verdana', 12, 'bold'), anchor='center').grid(
                       row=0, column=0, sticky='ew', padx=10, pady=8)
 
@@ -899,7 +901,10 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
                 decision = 'REJECT' if rejected else 'KEEP'
                 tile.configure(background=color, highlightbackground=color)
                 picture.configure(background=color)
-                status.configure(text=f'{index + 1}: {decision} ({origin})',
+                label = f'{index + 1}: {decision}'
+                if show_automatic:
+                    label += f' ({origin})'
+                status.configure(text=label,
                                  foreground='white' if rejected else '#102d19', background=color)
 
         def apply_slice(event=None):
@@ -916,15 +921,28 @@ def _manual_rejection_review(images, keep, diagnostics_path=None, bvals=None,
 
         footer = ttk.Frame(window, padding=8)
         footer.grid(row=3, column=0, sticky='ew')
-        ttk.Label(footer, text='Green = keep   Red = reject   (auto/manual shows decision source)').pack(side='left')
+        legend = 'Green = keep   Red = reject'
+        if show_automatic:
+            legend += '   (auto/manual shows decision source)'
+        ttk.Label(footer, text=legend).pack(side='left')
         ttk.Button(footer, text='Apply slice and continue', command=apply_slice).pack(side='right')
+        cancelled = [False]
+
+        def cancel_review():
+            cancelled[0] = True
+            apply_slice()
+
+        if allow_cancel:
+            ttk.Button(footer, text='Stop (discard this slice)', command=cancel_review).pack(side='right')
         window.bind('<Return>', apply_slice)
-        window.protocol('WM_DELETE_WINDOW', apply_slice)
+        window.protocol('WM_DELETE_WINDOW', cancel_review if allow_cancel else apply_slice)
         window.update_idletasks()
         refresh_tiles()
         update_intensity(maximum_value.get())
         redraw()
         wait_window(window)
+        if cancelled[0]:
+            raise InterruptedError('Manual review stopped; the current slice was not saved.')
     if save_decisions and diagnostics_path:
         decision_dir = os.path.join(diagnostics_path, '13_Diagnostics')
         os.makedirs(decision_dir, exist_ok=True)

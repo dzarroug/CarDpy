@@ -80,6 +80,19 @@ def Save_Diffusion_Image_Data(output_path, file_name, header, original_matrix, o
         f3.write('Parallel Imaging:      ' + str(header['Parallel Imaging']) + '\n')
     if 'Partial Fourier' in header:
         f3.write('Partial Fourier:       ' + str(header['Partial Fourier']) + '\n')
+    # Additional raw acquisition fields; internal provenance is saved in .shots.json.
+    units = {'X Resolution': 'mm', 'Y Resolution': 'mm', 'Z Resolution': 'mm',
+             'Echo Spacing': 'ms', 'Effective Echo Spacing': 'ms',
+             'Phase Encoding Bandwidth': 'Hz/pixel', 'Receiver Dwell Time': 'ns',
+             'Trigger Time Minimum': 'ms', 'Trigger Time Maximum': 'ms'}
+    for key in ('X Resolution', 'Y Resolution', 'Z Resolution', 'Scanner Orientation',
+                'Acquisition Rows', 'Acquisition Columns', 'Echo Train Length',
+                'Echo Spacing', 'Effective Echo Spacing', 'Phase Encoding Bandwidth',
+                'Protocol', 'Sequence', 'Patient Sex Code', 'Receiver Dwell Time',
+                'Readout Oversampling', 'Shot Metadata File',
+                'Trigger Time Minimum', 'Trigger Time Maximum'):
+        if key in header:
+            f3.write(f'{key}: {header[key]}' + (f' {units[key]}' if key in units else '') + '\n')
     f3.close()
     ########## Write matrix as NifTi ###############################################################################################################
     NifTi_string         = os.path.join(output_path, file_name + ".nii")
