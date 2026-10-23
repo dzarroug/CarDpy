@@ -56,6 +56,18 @@ setup details, see **[HOW_TO_USE.md](HOW_TO_USE.md)**.
 **2. Notebooks or Script (step-by-step).** Write a new script/notebook or use sample notebook. With Sample notebooks start with `01_Data_Processing`, then run
 `02_Post-Processing`, using the your data or the sample `Healthy_Volunteer_007` dataset.
 
+**Optional uncertainty.** Use [03_Uncertainty.ipynb](03_Uncertainty.ipynb) after processing,
+or set `config["uncertainty"]["enabled"] = True` before `process()`.
+Results are saved separately in `CarDpy_Output/14_Uncertainty/`.
+
+```python
+from cardpy.uncertainty import run_dataset
+result = run_dataset("/full/path/to/study/CarDpy_Output", iterations=400, n_jobs=4)
+```
+
+New runs save their config automatically. For older runs, pass their original
+full `config=config`; see the notebook for respiratory crop requirements.
+
 ## Associated Publication
 
 **Evaluating the Effect of Post-processing Steps When Analyzing Cardiac Diffusion Tensor Data**

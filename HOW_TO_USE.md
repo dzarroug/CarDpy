@@ -91,6 +91,7 @@ CarDpy creates `CarDpy_Output/` inside your study folder:
 - `11_Segmentation` — the myocardium mask (NRRD)
 - `12_Quantitative_Results` — metric maps (`.mat`) and 9-panel figures (`.png`)
 - `13_Diagnostics` — rejection plots, `Crop_Coordinates.txt`, `Rejection_Statistics.txt`
+- `14_Uncertainty` — optional MD/FA interval widths and E1/E2/E3 cone half-angles
 
 ---
 

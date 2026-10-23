@@ -23,6 +23,7 @@ dependencies = [
     "opencv-python",
     "scikit-image>=0.26",
     "scikit-learn",
+    "joblib",
     "dipy>=1.12,<2.0",
     "screeninfo",
     "kneed",

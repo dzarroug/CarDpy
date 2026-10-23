@@ -105,6 +105,16 @@ DEFAULT_CONFIG = {
         },
     },
 
+    ### ---- Optional uncertainty (after quantitative results) ----
+    "uncertainty": {
+        "enabled": False,
+        "iterations": 400,
+        "n_jobs": 4,
+        "seed": 0,
+        "desired_averages": None,  # None keeps the original repetition count
+        "keep_images": False,
+    },
+
     ### ---- Output ---
     "output": {
         "directory": None,  # None uses study_root/CarDpy_Output.

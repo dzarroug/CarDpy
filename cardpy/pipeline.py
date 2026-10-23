@@ -157,17 +157,23 @@ def _load(study_root, config):
     return matrix, bvals, bvecs, Header
 
 
-def process(study_root, config, save=True):
+def process(study_root, config, save=True, *, input_data=None, stop_after_dti=False):
     """
     Run the full CarDpy pipeline end to end in one call.
     Stalls at the contouring GUI (once per slice) until each window is closed,
     then resumes automatically. Writes stage outputs to CarDpy_Output when
-    save=True. Returns a dict of results.
+    save=True. Returns a dict of results. Optional input_data is a stacked
+    (matrix, bvals, bvecs, header) tuple; stop_after_dti skips contouring.
     """
     out_path = config.get("output", {}).get("directory") or os.path.join(study_root, "CarDpy_Output")
     out_path = os.path.abspath(os.path.expanduser(os.fspath(out_path)))
+    if config.get('uncertainty', {}).get('enabled', False) and not save and not stop_after_dti:
+        raise ValueError('Config-driven uncertainty requires save=True; use run_dataset separately otherwise.')
     if save:
         os.makedirs(out_path, exist_ok=True)
+        with open(os.path.join(out_path, 'processing_settings.json'), 'w') as stream:
+            json.dump(config, stream, indent=2, default=lambda value: value.tolist()
+                      if isinstance(value, np.ndarray) else os.fspath(value))
         write_processing_status(out_path, "running")
 
     op       = config["operation_type"]
@@ -210,7 +216,8 @@ def process(study_root, config, save=True):
         Save_Diffusion_Image_Data(output_path, name, Header, mm, bb, vv)
 
     # ----- Load + sort -----
-    matrix_stacked, bvals_stacked, bvecs_stacked, Header = _load(study_root, config)
+    matrix_stacked, bvals_stacked, bvecs_stacked, Header = (
+        _load(study_root, config) if input_data is None else input_data)
     print('Loaded matrix shape:', matrix_stacked.shape, '| b-values:', bvals_stacked.shape, '| b-vectors:', bvecs_stacked.shape)
     input_encodings = stacked2dictionary(matrix_stacked, bvals_stacked, bvecs_stacked)
     repetition_counts = [encoding['images'].shape[3] for encoding in input_encodings.values()]
@@ -337,7 +344,7 @@ def process(study_root, config, save=True):
             aligned = True
         if dictionary_processing:
             encodings = sorted2dictionary(m2, b2, v2)
-            respiratory_crop = None
+            respiratory_crop = rs.get('crop_coordinates')
             for encoding in encodings.values():
                 if encoding['images'].shape[3] < 2:
                     continue
@@ -350,9 +357,15 @@ def process(study_root, config, save=True):
                 encoding['images'] = ordered[:, :, :, 0, :]
             m, b, v = dictionary2sorted(encodings, mode='individual')
         else:
-            m, b, v, _ = respiratory_sorting(m2, b2, v2, zoom=rs["zoom"],
+            m, b, v, respiratory_crop = respiratory_sorting(m2, b2, v2, zoom=rs["zoom"],
                                              IntERACT_zoom=rs["interact_zoom"], organ=rs["organ"],
-                                             operation_type=op, gui_version=gui_version)
+                                             operation_type=op, gui_version=gui_version,
+                                             crop_coordinates=rs.get('crop_coordinates'))
+        if save and respiratory_crop is not None:
+            diagnostics = os.path.join(out_path, '13_Diagnostics')
+            os.makedirs(diagnostics, exist_ok=True)
+            with open(os.path.join(diagnostics, 'Respiratory_Crop.json'), 'w') as stream:
+                json.dump(np.asarray(respiratory_crop).tolist(), stream)
         _save_stage('Respiratory_Ordered', m, b, v, Header, folder_name='Respiratory_Sorted')
 
     # ----- Registration (standalone) -----
@@ -435,6 +448,9 @@ def process(study_root, config, save=True):
 
     # ===== DTI recon =====
     _, _, Eigenvectors, Standard_DTI_Metrics = DTI_recon(m, b, v, tensor_fit=config["dti"]["tensor_fit"], b0_threshold=b0_threshold)
+    if stop_after_dti:
+        return dict(dti_metrics=Standard_DTI_Metrics, eigenvectors=Eigenvectors,
+                    matrix=m, bvals=b, bvecs=v, header=Header)
 
     # ===== Contouring =====
     endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
@@ -575,7 +591,7 @@ def process(study_root, config, save=True):
     if save:
         write_processing_status(out_path, "complete")
 
-    return {
+    results = {
         "HAP":             pitch["HAP"],
         "HAP_mm":          pitch["HAP_mm"],
         "hap":             pitch,
@@ -592,3 +608,7 @@ def process(study_root, config, save=True):
         "contours":        {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                             "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP},
     }
+    if config.get('uncertainty', {}).get('enabled', False):
+        from cardpy.uncertainty import run_dataset
+        results['uncertainty'] = run_dataset(out_path, config=config)
+    return results
