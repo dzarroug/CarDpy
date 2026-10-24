@@ -89,7 +89,8 @@ def load_dataset(directory, config=None):
             raise ValueError(f'Missing saved respiratory ROI: {crop}. Save the ROI in normal processing first.')
         if coordinates is None:
             sources.append(crop)
-            coordinates = json.loads(crop.read_text())
+            saved = json.loads(crop.read_text())
+            coordinates = saved['crop_coordinates'] if isinstance(saved, dict) else saved
         respiratory['crop_coordinates'] = coordinates
     return data, np.asarray(bvals), np.asarray(bvecs), header, config, sources, warnings
 

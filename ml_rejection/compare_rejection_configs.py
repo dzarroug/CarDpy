@@ -52,7 +52,7 @@ N_JOBS = 4
 OUT = "rejection_comparison_purl"
 BOOTSTRAP = False  
 
-# Order matters: the first config draws contours/crops; the rest reuse them.
+# first config draws contours/crops; the rest reuse them.
 CONFIGS = [
     "algorithm",
     "none",
@@ -115,8 +115,11 @@ def run_one(name, study_path, subpath, cfg_name, first):
 
     shutil.rmtree(os.path.join(out_dir, "14_Uncertainty"), ignore_errors=True)   # stale/partial runs
 
-    if cfg_name == "none":
-        cfg["rejection"]["enabled"] = False
+    if cfg_name == "none":   # same processing path as the other configs, but rejects nothing
+        cfg["rejection"]["enabled"] = True
+        cfg["rejection"]["mode"] = "ml"
+        cfg["rejection"]["ml_model_path"] = os.path.abspath(MODEL)
+        cfg["rejection"]["ml_threshold"] = 1.01
     elif cfg_name in ("algorithm", "ml"):
         cfg["rejection"]["enabled"] = True
         cfg["rejection"]["mode"] = cfg_name
@@ -301,5 +304,7 @@ if __name__ == "__main__":
         for name, (path, sub) in resolved.items():
             os.makedirs(os.path.join(OUT, name), exist_ok=True)
             for i, c in enumerate(CONFIGS):
+                if os.path.exists(os.path.join(OUT, name, f"{c}.npz")):
+                    print(f"{name}: {c} already done, skipping"); continue
                 run_one(name, path, sub, c, first=(i == 0))
         compare()
