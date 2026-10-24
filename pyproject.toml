@@ -28,15 +28,18 @@ dependencies = [
     "screeninfo",
     "kneed",
     "pillow",
+    "torch",
+    "nnunetv2>=2.5",
+    "ultralytics>=8.3",
+    "huggingface_hub>=0.25",
 ]
 
 [project.optional-dependencies]
 macos = ["tkmacosx"]
-ml = ["torch"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cardpy*"]
 
 [tool.setuptools.package-data]
-cardpy = ["Colormaps_data/*.txt", "Data_Processing/models/*.pt"]
+cardpy = ["Colormaps_data/*.txt", "Data_Processing/models/*.pt", "Data_Processing/nnunet_cdti/LICENSE"]

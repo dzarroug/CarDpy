@@ -10,6 +10,10 @@ Per study, the FIRST config ('algorithm') opens the GUIs: heart crop, stomach cr
 contours. Later configs reuse the same contours and stomach crop, so the only
 difference between configs is the rejection step.
 
+Bootstrapping: off by default (BOOTSTRAP = False). Each config's complete run is kept in
+rejection_comparison/<study>/<config>/CarDpy_Output, so it can be bootstrapped later with
+cardpy.uncertainty.run_dataset(<that folder>, iterations=400) and picked up by --compare.
+
 Outputs in rejection_comparison/<study>/:
   <config>.npz                metrics + mask + background
   <config>_uncertainty.npz    dMD / dFA / dE1 maps (copied from 14_Uncertainty)
@@ -46,13 +50,14 @@ SLICES = [3, 5, 7]         # None = all slices; [3, 5, 7] = base / mid / apex fo
 ITERATIONS = 2           # bootstrap iterations (2 to test)
 N_JOBS = 4
 OUT = "rejection_comparison_purl"
+BOOTSTRAP = False  
 
 # Order matters: the first config draws contours/crops; the rest reuse them.
 CONFIGS = [
     "algorithm",
     "none",
     "ml",
-    # "manual",   # enable once Ariel's decisions exist: put her Rejection_Configuration.json at
+    # "manual",   # Rejection_Configuration.json at
     #             # rejection_comparison/<study>/manual_Rejection_Configuration.json
 ]
 # --------------------------------------------
@@ -77,8 +82,16 @@ def run_one(name, study_path, subpath, cfg_name, first):
     from cardpy.pipeline import process
 
     study_out = os.path.join(OUT, name)
-    out_dir = os.path.abspath(os.path.join(study_out, "CarDpy_Output"))
+    # each config gets its own complete output folder (needed to bootstrap it later)
+    out_dir = os.path.abspath(os.path.join(study_out, cfg_name, "CarDpy_Output"))
     diag = os.path.join(out_dir, "13_Diagnostics")
+    first_out = os.path.abspath(os.path.join(study_out, CONFIGS[0], "CarDpy_Output"))
+    if not first:   # copy contours + stomach crop from the first config's run
+        for rel in ("11_Segmentation/Segmentation.json", "13_Diagnostics/Respiratory_Crop.json"):
+            src = os.path.join(first_out, rel)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(os.path.join(out_dir, rel)), exist_ok=True)
+                shutil.copy(src, os.path.join(out_dir, rel))
 
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     cfg["data_type"] = DATA_TYPE
@@ -92,16 +105,15 @@ def run_one(name, study_path, subpath, cfg_name, first):
     have_contours = os.path.exists(os.path.join(out_dir, "11_Segmentation", "Segmentation.json"))
     cfg["gui"]["reuse_existing_segmentation"] = have_contours
     cfg["gui"]["segmentation_review"] = first
-    cfg["uncertainty"].update(enabled=True, iterations=ITERATIONS, n_jobs=N_JOBS, seed=0)
+    cfg["uncertainty"].update(enabled=BOOTSTRAP, iterations=ITERATIONS, n_jobs=N_JOBS, seed=0)
     cfg["rejection"]["manual_review"] = False
 
     crop_file = os.path.join(diag, "Respiratory_Crop.json")   # reuse the stomach crop once drawn
     if os.path.exists(crop_file):
-        cfg["respiratory"]["crop_coordinates"] = json.load(open(crop_file))
+        saved = json.load(open(crop_file))   # newer CarDpy saves {"image_shape", "organ", "crop_coordinates"}
+        cfg["respiratory"]["crop_coordinates"] = saved["crop_coordinates"] if isinstance(saved, dict) else saved
 
-    # Each config bootstraps into the same 14_Uncertainty folder, which refuses to mix
-    # settings; the previous config's results were already copied out, so clear it.
-    shutil.rmtree(os.path.join(out_dir, "14_Uncertainty"), ignore_errors=True)
+    shutil.rmtree(os.path.join(out_dir, "14_Uncertainty"), ignore_errors=True)   # stale/partial runs
 
     if cfg_name == "none":
         cfg["rejection"]["enabled"] = False
@@ -133,7 +145,7 @@ def run_one(name, study_path, subpath, cfg_name, first):
     unc = os.path.join(out_dir, "14_Uncertainty", "uncertainty.npz")
     if os.path.exists(unc):
         shutil.copy(unc, os.path.join(study_out, f"{cfg_name}_uncertainty.npz"))
-    else:
+    elif BOOTSTRAP:
         print(f"  warning: no 14_Uncertainty/uncertainty.npz for {cfg_name}")
 
     qr = os.path.join(out_dir, "12_Quantitative_Results")
@@ -145,7 +157,6 @@ def run_one(name, study_path, subpath, cfg_name, first):
     stats = os.path.join(diag, "Rejection_Statistics.txt")
     if os.path.exists(stats) and cfg_name != "none":
         shutil.copy(stats, os.path.join(study_out, f"{cfg_name}_Rejection_Statistics.txt"))
-        os.remove(stats)   # so a later config can't pick up a stale file
 
 
 def n_rejected(path):
@@ -222,8 +233,12 @@ def compare():
                if os.path.exists(os.path.join(study, f"{c}.npz"))}
         if not met:
             continue
-        unc = {c: np.load(os.path.join(study, f"{c}_uncertainty.npz")) for c in CONFIGS
-               if os.path.exists(os.path.join(study, f"{c}_uncertainty.npz"))}
+        unc = {}
+        for c in CONFIGS:
+            for f in (os.path.join(study, f"{c}_uncertainty.npz"),
+                      os.path.join(study, c, "CarDpy_Output", "14_Uncertainty", "uncertainty.npz")):
+                if os.path.exists(f):
+                    unc[c] = np.load(f); break
         ref = met.get("algorithm") or next(iter(met.values()))
         mask = ref["mask"] > 0
         if mask.ndim == 2:

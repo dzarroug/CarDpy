@@ -172,6 +172,11 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     save=True. Returns a dict of results. Optional input_data is a stacked
     (matrix, bvals, bvecs, header) tuple; stop_after_dti skips contouring.
     """
+    import matplotlib
+    if matplotlib.get_backend().lower() == 'macosx':
+        import matplotlib.pyplot as plt
+        plt.switch_backend('TkAgg')
+        
     out_path = config.get("output", {}).get("directory") or os.path.join(study_root, "CarDpy_Output")
     out_path = os.path.abspath(os.path.expanduser(os.fspath(out_path)))
     if config.get('uncertainty', {}).get('enabled', False) and not save and not stop_after_dti:
@@ -498,7 +503,15 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
                     matrix=m, bvals=b, bvecs=v, header=Header)
 
     # ===== Contouring =====
+    seg_cfg = config.get("segmentation", {})
+    seg_mode = seg_cfg.get("mode", "manual")
+    if seg_mode not in ('manual', 'auto'):
+        raise ValueError("segmentation.mode must be 'manual' or 'auto'.")
+    auto_review = seg_cfg.get("review", False)
+    if seg_mode == 'auto' and auto_review and gui_version != 'v2':
+        raise ValueError('Reviewing auto segmentation requires gui.version="v2".')
     endo_x, endo_y, epi_x, epi_y, antRVIP, infRVIP = [], [], [], [], [], []
+    slice_sources, model_masks = [], {}
     saved_segmentation = None
     segmentation_bounds = []
     segmentation_json = gui.get("segmentation_json")
@@ -521,13 +534,48 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         if source_shape.shape != (2,) or not np.isfinite(source_shape).all() or np.any(source_shape <= 0):
             raise ValueError('Saved segmentation image_shape must contain two positive dimensions.')
         scale_x, scale_y = m.shape[1] / source_shape[1], m.shape[0] / source_shape[0]
+    diffusion = b > np.min(b)
+    auto = None
+    if saved_segmentation is None and seg_mode == 'auto':
+        from cardpy.Data_Processing.Auto_Segmentation import auto_segment
+        print('Auto segmentation mode is on.')
+        avg_stack = np.stack([np.nanmean(np.real(m[:, :, s_i, diffusion, :]), axis=(2, 3))
+                              for s_i in range(m.shape[2])], axis=2)
+        auto = auto_segment(avg_stack, Standard_DTI_Metrics['MD'],
+                            weights_dir=seg_cfg.get("weights_dir"),
+                            work_dir=os.path.join(out_path, '11_Segmentation', 'Auto_Work') if save else None)
     for slc in range(m.shape[2]):
-        diffusion = b > np.min(b)
         avg_diff = np.nanmean(np.real(m[:, :, slc, diffusion, :]), axis=(2, 3))
         MD       = Standard_DTI_Metrics['MD'][:, :, slc]
         E1       = Eigenvectors['E1'][:, :, slc, :]
         initial_contours = None
         bounds = None
+        open_gui = saved_segmentation is None or review_segmentation
+        source = 'saved' if saved_segmentation is not None else 'manual'
+        if auto is not None:
+            result = auto[slc]
+            complete = result is not None and result['antRVIP'] is not None and result['infRVIP'] is not None
+            if result is None:
+                print('Slice %d: auto segmentation failed, opening manual contouring.' % (slc + 1))
+            elif auto_review and not complete:
+                print('Slice %d: RV insertion points not detected, opening manual contouring.' % (slc + 1))
+            elif auto_review:
+                initial_contours = {'endo': result['endo'], 'epi': result['epi'],
+                                    'antRVIP': np.asarray(result['antRVIP'])[None, :],
+                                    'infRVIP': np.asarray(result['infRVIP'])[None, :]}
+                source = 'auto_reviewed'
+            else:
+                if not complete:
+                    print('Slice %d: RV insertion point(s) not detected; stored as NaN.' % (slc + 1))
+                ex, ey = result['endo'][:, 0].tolist(), result['endo'][:, 1].tolist()
+                px, py = result['epi'][:, 0].tolist(), result['epi'][:, 1].tolist()
+                aRV = result['antRVIP'] or [float('nan'), float('nan')]
+                iRV = result['infRVIP'] or [float('nan'), float('nan')]
+                if seg_cfg.get("use_model_mask", True):
+                    model_masks[slc] = result['mask']
+                open_gui = False
+                source = 'auto'
+        slice_sources.append(source)
         if saved_segmentation is not None:
             c = saved_segmentation["contours"]
             ex = (np.asarray(c["endo_x"][slc][0]) * scale_x).tolist()
@@ -544,7 +592,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             if saved_crops and saved_crops[slc] is not None:
                 from cardpy.GUI_Tools._image_controls import scale_crop
                 bounds = scale_crop(saved_crops[slc], source_shape, m.shape[:2])
-        if saved_segmentation is None or review_segmentation:
+        if open_gui:
             if gui.get("segmentation_zoom", True) and bounds is None and segmentation_crop is not None:
                 from cardpy.GUI_Tools._image_controls import scale_crop
                 bounds = scale_crop([coordinates[slc] for coordinates in segmentation_crop],
@@ -561,6 +609,9 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
     # ===== Masks =====
     myocardium_mask = np.zeros([m.shape[0], m.shape[1], m.shape[2]])
     for slc in range(myocardium_mask.shape[2]):
+        if slc in model_masks:
+            myocardium_mask[:, :, slc] = model_masks[slc]
+            continue
         temp = np.zeros([m.shape[0], m.shape[1]])
         myocardium_mask[:, :, slc] = Myocardial_Mask_Contour_Filler(
             temp, np.vstack((endo_x[slc][0], endo_y[slc][0])),
@@ -575,6 +626,8 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
                              "voxel_spacing": [float(Header.get(axis + ' Resolution', 1.0)) for axis in ('X', 'Y', 'Z')],
                              "slice_index": list(range(m.shape[2])),
                              "crop_bounds": segmentation_bounds,
+                             "segmentation_mode": seg_mode,
+                             "slice_sources": slice_sources,
                              "contours": {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                                           "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP}}
         with open(os.path.join(seg_path, 'Segmentation.json'), 'w', encoding='utf-8') as stream:
@@ -662,6 +715,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         "header":          Header,
         "contours":        {"endo_x": endo_x, "endo_y": endo_y, "epi_x": epi_x,
                             "epi_y": epi_y, "antRVIP": antRVIP, "infRVIP": infRVIP},
+        "segmentation_sources": slice_sources,
     }
     if config.get('uncertainty', {}).get('enabled', False):
         from cardpy.uncertainty import run_dataset

@@ -105,7 +105,7 @@ def ml_keep_matrix(stacked, bvals, bvecs, model_path=None, threshold=None,
         import torch
         torch.set_num_threads(1)
     except ImportError as e:
-        raise ImportError("rejection_mode='ml' needs PyTorch: pip install \"cardpy-cmr[ml]\"") from e
+        raise ImportError("rejection_mode='ml' needs PyTorch, which should come with cardpy-cmr; try reinstalling.") from e
 
     model_path = model_path or DEFAULT_MODEL
     if not os.path.exists(model_path):

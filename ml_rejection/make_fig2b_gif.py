@@ -1,7 +1,7 @@
 """
 make_fig2b_gif.py -- Figure 2b: animated GIF stepping through slices of one TEST dataset.
 
-Each frame = one slice. Grid: rows = averages, columns = diffusion encodings.
+Each frame = one slice. Grid: rows = b = 0 and ONE diffusion direction, columns = averages.
 Each tile = the image the model saw (01_Unrung, 80x80 around the heart).
   solid green border  = ML accepted
   dashed red border   = ML rejected
@@ -11,6 +11,7 @@ Each tile = the image the model saw (01_Unrung, 80x80 around the heart).
   python ml_rejection/make_fig2b_gif.py                 # auto-picks the test dataset with the most rejections
   python ml_rejection/make_fig2b_gif.py --list          # list test datasets with their counts
   python ml_rejection/make_fig2b_gif.py --dataset "<name from --list>"
+  python ml_rejection/make_fig2b_gif.py --direction 7   # choose the direction (default: most rejections)
 
 Writes ml_rejection/figures/fig2b.gif (+ fig2b_frames/slice_XX.png)
 """
@@ -51,21 +52,21 @@ def summary(preds):
                         ).sort_values(["algorithm_rejected", "ml_rejected"], ascending=False)
 
 
-def frame(ds_rows, X, crop, s, n_slices, n_dir, n_avg, enc_labels, title, dpi=120):
-    tile = 0.62
-    fig = plt.figure(figsize=(n_dir * tile + 1.1, n_avg * tile + 1.1), dpi=dpi)
-    gs = fig.add_gridspec(n_avg, n_dir, left=0.06, right=0.995, top=0.86, bottom=0.12,
-                          wspace=0.08, hspace=0.08)
+def frame(ds_rows, X, crop, s, encodings, n_avg, enc_labels, title, dpi=120):
+    tile = 1.35
+    fig = plt.figure(figsize=(n_avg * tile + 1.2, len(encodings) * tile + 1.3), dpi=dpi)
+    gs = fig.add_gridspec(len(encodings), n_avg, left=0.13, right=0.99, top=0.84, bottom=0.14,
+                          wspace=0.06, hspace=0.06)
     rows = ds_rows[ds_rows.slice == s].set_index(["direction", "average"])
-    for a in range(n_avg):
-        for d in range(n_dir):
-            ax = fig.add_subplot(gs[a, d]); ax.set_xticks([]); ax.set_yticks([])
+    for e_i, d in enumerate(encodings):
+        for a in range(n_avg):
+            ax = fig.add_subplot(gs[e_i, a]); ax.set_xticks([]); ax.set_yticks([])
             for sp in ax.spines.values():
                 sp.set_visible(False)
+            if e_i == 0:
+                ax.set_title(f"Avg {a + 1}", fontsize=8, pad=3)
             if a == 0:
-                ax.set_title(enc_labels[d], fontsize=6, pad=2)
-            if d == 0:
-                ax.set_ylabel(f"Avg {a + 1}", fontsize=6)
+                ax.set_ylabel(enc_labels[d], fontsize=8)
             if (d, a) not in rows.index:
                 ax.imshow(np.full((2, 2), 0.5), cmap="gray", vmin=0, vmax=1)
                 continue
@@ -77,18 +78,18 @@ def frame(ds_rows, X, crop, s, n_slices, n_dir, n_avg, enc_labels, title, dpi=12
             ax.imshow(img.T, cmap="gray", origin="lower", vmin=0, vmax=1.0)
             rej = int(r.pred) == 1
             h, w = img.shape
-            ax.add_patch(Rectangle((-0.5, -0.5), w, h, fill=False, lw=2.2 if rej else 1.6,
+            ax.add_patch(Rectangle((-0.5, -0.5), w, h, fill=False, lw=3 if rej else 2.2,
                                    ls=(0, (3, 2)) if rej else "-", ec=RED if rej else GREEN, clip_on=False))
             if int(r.pred) != int(r.y):   # inner yellow halo: algorithm disagrees
-                inset = 0.09 * min(h, w)
+                inset = 0.07 * min(h, w)
                 ax.add_patch(Rectangle((-0.5 + inset, -0.5 + inset), w - 2 * inset, h - 2 * inset,
-                                       fill=False, lw=1.8, ls="-", ec=MARK, clip_on=False))
+                                       fill=False, lw=2.4, ls="-", ec=MARK, clip_on=False))
     fig.suptitle(title, fontsize=9, y=0.97)
     handles = [Line2D([], [], color=GREEN, lw=2, label="ML accepted"),
                Line2D([], [], color=RED, lw=2, ls=(0, (3, 2)), label="ML rejected"),
                Line2D([], [], color=MARK, lw=2, label="Algorithm disagrees (inner border)"),
                Line2D([], [], marker="s", ls="", mfc="0.5", mec="0.5", label="Excluded (ambiguous label)")]
-    fig.legend(handles=handles, loc="lower center", ncol=4, fontsize=7, frameon=False)
+    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=7, frameon=False)
     fig.canvas.draw()
     im = Image.frombuffer("RGBA", fig.canvas.get_width_height(), fig.canvas.buffer_rgba()).convert("RGB")
     plt.close(fig)
@@ -100,6 +101,7 @@ if __name__ == "__main__":
     ap.add_argument("--run", default="crop80")
     ap.add_argument("--dataset", help="test dataset name (see --list)")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--direction", type=int, help="diffusion direction to show next to b = 0 (default: most rejections)")
     ap.add_argument("--seconds", type=float, default=2.0, help="seconds per slice")
     ap.add_argument("--dpi", type=int, default=120, help="lower = smaller GIF file")
     args = ap.parse_args()
@@ -112,23 +114,29 @@ if __name__ == "__main__":
     if ds not in table.index:
         raise SystemExit(f"{ds!r} is not a test dataset; run with --list")
     rows = preds[preds.dataset == ds]
-    n_dir, n_avg = int(rows.direction.max()) + 1, int(rows.average.max()) + 1
+    n_avg = int(rows.average.max()) + 1
     slices = sorted(rows.slice.unique())
     bvals = rows.groupby("direction")["bval"].first()
-    enc_labels = ["b0" if bvals.get(d, 1) < 1 else f"Dir {d}" for d in range(n_dir)]
+    b0_dirs = [d for d, b in bvals.items() if b < 1]
+    dw = rows[~rows.direction.isin(b0_dirs)]
+    if args.direction is None:   # direction with the most rejections (ML or algorithm), then disagreements
+        score = dw.groupby("direction").apply(lambda g: (g.pred | g.y).sum() * 100 + (g.pred != g.y).sum())
+        args.direction = int(score.idxmax())
+    encodings = [b0_dirs[0] if b0_dirs else 0, args.direction]
+    enc_labels = {d: ("b = 0" if bvals.get(d, 1) < 1 else f"Dir {d}\n(b = {bvals[d]:g})") for d in encodings}
 
     out_dir = os.path.join(FIGS, "fig2b_frames")
     os.makedirs(out_dir, exist_ok=True)
     frames = []
     for s in slices:
-        sr = rows[rows.slice == s]
-        title = (f"Slice {s + 1} of {len(slices)}  |  ML rejected {int(sr.pred.sum())}  |  "
+        sr = rows[(rows.slice == s) & rows.direction.isin(encodings)]
+        title = (f"Slice {s + 1} of {len(slices)}\nML rejected {int(sr.pred.sum())}  |  "
                  f"algorithm rejected {int(sr.y.sum())}  |  disagreements {int((sr.pred != sr.y).sum())}")
-        im = frame(rows, X, crop, s, len(slices), n_dir, n_avg, enc_labels, title, dpi=args.dpi)
+        im = frame(rows, X, crop, s, encodings, n_avg, enc_labels, title, dpi=args.dpi)
         im.save(os.path.join(out_dir, f"slice_{s + 1:02d}.png"))
         frames.append(im)
     gif = os.path.join(FIGS, "fig2b.gif")
     frames[0].save(gif, save_all=True, append_images=frames[1:], duration=int(args.seconds * 1000), loop=0)
-    print(f"dataset: {ds}")
+    print(f"dataset: {ds} | encodings shown: b = 0 and direction {args.direction}")
     print(table.loc[ds].to_string())
     print(f"wrote {gif} ({len(frames)} frames, {os.path.getsize(gif) / 1e6:.1f} MB) and {out_dir}/")

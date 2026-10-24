@@ -22,6 +22,16 @@ DEFAULT_CONFIG = {
         "md_max":            3.0,       # v2 display maximum, in µm^2/ms
     },
 
+    ### ---- Segmentation (contouring) ----
+    "segmentation": {
+        "mode":           "manual",  # "manual" (draw contours) / "auto" (nnUNet_cDTI model)
+        # Set True to review auto contours before analysis (requires gui.version="v2").
+        # Slices the model cannot segment always open the manual GUI.
+        "review":         False,
+        "weights_dir":    None,      # None = ~/.cache/cardpy/cdti-lv-baseline (auto-downloaded)
+        "use_model_mask": True,      # unreviewed slices: True = model mask, False = refill from contours
+    },
+
     ### ---- Gibbs ringing removal ----
     "gibbs": {
         "enabled": True,
