@@ -1,13 +1,21 @@
 """
 make_fig5.py -- Figure 5: automated vs manual LV segmentation.
 
-Uses the comparison runs: the manual contours are the ones drawn for the
+Uses the comparison runs: the manual contours are the ones you drew for the
 'algorithm' configuration. Step 1 re-runs that exact configuration with
 segmentation.mode = "auto" (same crops, same rejection decisions -> no GUIs),
 so the ONLY difference is the segmentation. Step 2 compares.
 
   python ml_rejection/make_fig5.py --run        # step 1 (after the comparison runs finish)
   python ml_rejection/make_fig5.py              # step 2: figure + table
+
+Second reader: re-run with saved crops/rejection and draw your own contours (opens the
+contour GUI only), saved as <name>.npz next to the others:
+  python ml_rejection/make_fig5.py --manual-run ariel_seg --root rejection_comparison_cima --raw /path/to/cima
+
+Any pair can be compared (default: --ref algorithm = first reader, --test auto_seg):
+  python ml_rejection/make_fig5.py --root rejection_comparison_cima --ref ariel_seg --test auto_seg \
+      --ref-label "Reader 2" --test-label "Automated"
 
 Options: --root rejection_comparison_purl  --raw PURL_test_raw   (Cima.X: --root rejection_comparison_cima --raw /path/to/Dahnia)
 
@@ -27,7 +35,7 @@ import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "figures")
-REF = "algorithm"   # the configuration whose manual contours are the reference
+REF = "algorithm"   # the configuration whose saved crops/rejection/contours are reused
 
 
 def studies(root):
@@ -35,15 +43,17 @@ def studies(root):
                   if os.path.isdir(os.path.join(root, d, REF, "CarDpy_Output")))
 
 
-def run_auto(root, raw):
+def run_seg(root, raw, out_name="auto_seg", auto=True):
+    """Re-run the REF configuration with identical crops and rejection decisions.
+    auto=True: automated segmentation (no GUIs). auto=False: opens the contour GUI for a new reader."""
     from cardpy.pipeline import process
 
     for name in studies(root):
         src = os.path.join(root, name, REF, "CarDpy_Output")
         settings = json.load(open(os.path.join(src, "processing_settings.json")))
         cfg = settings.get("cardpy", settings)
-        out = os.path.abspath(os.path.join(root, name, "auto_seg", "CarDpy_Output"))
-        if os.path.exists(os.path.join(root, name, "auto_seg.npz")):
+        out = os.path.abspath(os.path.join(root, name, out_name, "CarDpy_Output"))
+        if os.path.exists(os.path.join(root, name, f"{out_name}.npz")):
             print(f"{name}: already done"); continue
         shutil.rmtree(out, ignore_errors=True)
         os.makedirs(os.path.join(out, "13_Diagnostics"), exist_ok=True)
@@ -57,15 +67,18 @@ def run_auto(root, raw):
         cfg["gui"]["reuse_existing_segmentation"] = False
         cfg["gui"]["segmentation_review"] = False
         cfg.setdefault("uncertainty", {})["enabled"] = False
-        cfg.setdefault("segmentation", {}).update(mode="auto", review=False, use_model_mask=True)
+        if auto:
+            cfg.setdefault("segmentation", {}).update(mode="auto", review=False, use_model_mask=True)
+        else:
+            cfg.setdefault("segmentation", {}).update(mode="manual")
 
-        print(f"\n===== {name}: auto segmentation =====")
+        print(f"\n===== {name}: {'auto segmentation' if auto else 'manual segmentation (' + out_name + ')'} =====")
         res = process(os.path.join(raw, name), cfg)
         flat = {f"{g}__{k}": np.asarray(v, dtype=float)
                 for g in ("dti_metrics", "cardiac_metrics") for k, v in (res.get(g) or {}).items()}
         flat["mask"] = np.asarray(res["mask"], dtype=float)
         flat["background"] = np.nanmean(np.real(np.asarray(res["matrix"])), axis=(3, 4))
-        np.savez_compressed(os.path.join(root, name, "auto_seg.npz"), **flat)
+        np.savez_compressed(os.path.join(root, name, f"{out_name}.npz"), **flat)
         print(f"{name}: sources = {res.get('segmentation_sources')}")
 
 
@@ -87,18 +100,18 @@ def outline(ax, m, color, label):
     ax.plot([], [], color=color, lw=2, label=label)
 
 
-def compare(root):
+def compare(root, ref="algorithm", test="auto_seg", ref_label="Manual", test_label="Automated"):
     rows, examples = [], []
     for name in studies(root):
-        fa, fb = os.path.join(root, name, f"{REF}.npz"), os.path.join(root, name, "auto_seg.npz")
+        fa, fb = os.path.join(root, name, f"{ref}.npz"), os.path.join(root, name, f"{test}.npz")
         if not (os.path.exists(fa) and os.path.exists(fb)):
             continue
         A, B = np.load(fa), np.load(fb)
         ma, mb = A["mask"] > 0, B["mask"] > 0
         if ma.ndim == 2:
             ma, mb = ma[..., None], mb[..., None]
-        ha = hap(os.path.join(root, name, REF, "CarDpy_Output", "12_Quantitative_Results", "HAP.mat"))
-        hb = hap(os.path.join(root, name, "auto_seg", "CarDpy_Output", "12_Quantitative_Results", "HAP.mat"))
+        ha = hap(os.path.join(root, name, ref, "CarDpy_Output", "12_Quantitative_Results", "HAP.mat"))
+        hb = hap(os.path.join(root, name, test, "CarDpy_Output", "12_Quantitative_Results", "HAP.mat"))
         for s in range(ma.shape[2]):
             a, b = ma[..., s], mb[..., s]
             if not a.any():
@@ -114,9 +127,10 @@ def compare(root):
             examples.append((row["dice"], name, s, A["background"], a, b))
     df = pd.DataFrame(rows)
     if df.empty:
-        raise SystemExit("No studies with both manual and auto results -- run with --run first.")
+        raise SystemExit(f"No studies with both {ref}.npz and {test}.npz under {root}.")
     os.makedirs(FIGS, exist_ok=True)
-    df.to_csv(os.path.join(FIGS, "fig5_per_slice.csv"), index=False)
+    tag = f"{os.path.basename(os.path.normpath(root))}_{ref}_vs_{test}"
+    df.to_csv(os.path.join(FIGS, f"fig5_{tag}.csv"), index=False)
 
     metrics = [m for m in ("MD", "FA", "HAP") if f"{m}_manual" in df]
     units = {"MD": "µm²/ms", "FA": "", "HAP": "°/%"}
@@ -132,8 +146,8 @@ def compare(root):
     ax = fig.add_subplot(gs[0])
     img = bg[..., s] if bg.ndim == 3 else bg
     ax.imshow(img[y0:y1, x0:x1], cmap="gray", vmin=0, vmax=np.nanpercentile(img, 99.5))
-    outline(ax, a[y0:y1, x0:x1], "#2ca02c", "Manual")
-    outline(ax, b[y0:y1, x0:x1], "#ff7f0e", "Automated")
+    outline(ax, a[y0:y1, x0:x1], "#2ca02c", ref_label)
+    outline(ax, b[y0:y1, x0:x1], "#ff7f0e", test_label)
     ax.set_xticks([]); ax.set_yticks([]); ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=2, fontsize=8, frameon=False)
     ax.set_title(f"(a) Example (Dice {dice(a, b):.2f})", fontsize=10)
 
@@ -154,20 +168,20 @@ def compare(root):
         pad = 0.05 * (hi - lo or 1)
         ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], "--", color="gray", lw=1)
         ax.set_xlim(lo - pad, hi + pad); ax.set_ylim(lo - pad, hi + pad)
-        ax.set_xlabel(f"Manual {units[m]}".strip()); ax.set_ylabel(f"Automated {units[m]}".strip())
+        ax.set_xlabel(f"{ref_label} {units[m]}".strip()); ax.set_ylabel(f"{test_label} {units[m]}".strip())
         diff = (y - x)
         ax.set_title(f"{'(c) ' if i == 0 else ''}{m}\nbias {np.nanmean(diff):+.3f}", fontsize=10)
         ax.set_aspect("equal", adjustable="box")
-    out = os.path.join(FIGS, "fig5.png")
+    out = os.path.join(FIGS, f"fig5_{tag}.png")
     fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
 
-    print(f"{len(df)} slices from {df.study.nunique()} participants | Dice median {med:.3f} "
+    print(f"{ref_label} vs {test_label}: {len(df)} slices from {df.study.nunique()} participants | Dice median {med:.3f} "
           f"(IQR {df.dice.quantile(.25):.3f}-{df.dice.quantile(.75):.3f})")
     for m in metrics:
         d = df[f"{m}_auto"] - df[f"{m}_manual"]
         print(f"{m}: bias {d.mean():+.4f}, 95% limits of agreement {d.mean() - 1.96 * d.std():+.4f} to "
               f"{d.mean() + 1.96 * d.std():+.4f}")
-    print("wrote", out, "and fig5_per_slice.csv")
+    print("wrote", out, f"and fig5_{tag}.csv")
 
 
 if __name__ == "__main__":
@@ -175,7 +189,13 @@ if __name__ == "__main__":
     ap.add_argument("--run", action="store_true", help="run auto segmentation first")
     ap.add_argument("--root", default="rejection_comparison_purl")
     ap.add_argument("--raw", default="PURL_test_raw", help="folder containing the raw <study> folders")
+    ap.add_argument("--manual-run", metavar="NAME", help="draw a second reader's contours, saved as NAME")
+    ap.add_argument("--ref", default="algorithm"); ap.add_argument("--test", default="auto_seg")
+    ap.add_argument("--ref-label", default="Manual"); ap.add_argument("--test-label", default="Automated")
     args = ap.parse_args()
+    if args.manual_run:
+        run_seg(args.root, args.raw, out_name=args.manual_run, auto=False)
+        raise SystemExit(f"Saved {args.manual_run}.npz for each study. Compare with --ref/--test.")
     if args.run:
-        run_auto(args.root, args.raw)
-    compare(args.root)
+        run_seg(args.root, args.raw, out_name="auto_seg", auto=True)
+    compare(args.root, args.ref, args.test, args.ref_label, args.test_label)
