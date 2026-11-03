@@ -32,18 +32,27 @@ def _apply_dictionary_keep(dictionary_items, keep_matrix_stacked):
     return accepted_encodings, stats_by_encoding, keep_by_encoding
 
 
-def _apply_sorted_keep(matrix, keep):
-    """Keep each accepted repetition once, with repetition 0 as fallback."""
+def _apply_sorted_keep(matrix, keep, bvals=None, bvecs=None):
+    """Apply decisions in place order, retaining one fallback per encoding."""
     import numpy as np
     accepted = np.array(matrix, dtype=np.complex128 if np.iscomplexobj(matrix) else float, copy=True)
     if keep.shape != matrix.shape[2:]:
         raise ValueError('Rejection decisions must match slices, encodings, and repetitions.')
-    for slc, dif in np.ndindex(keep.shape[:2]):
-        bad = np.flatnonzero(keep[slc, dif] == 0)
-        if not np.any(keep[slc, dif]):
-            print('All repetitions were rejected for slice %i, direction %i; retaining repetition 0.' % (slc + 1, dif + 1))
-            bad = bad[bad != 0]
-        accepted[:, :, slc, dif, bad] = np.nan
+    groups = {}
+    for avg in range(matrix.shape[4]):
+        for dif in range(matrix.shape[3]):
+            key = dif if bvals is None else (
+                round(float(bvals[dif]), 5), *np.round(bvecs[dif], 5).tolist())
+            groups.setdefault(key, []).append((dif, avg))
+    for slc in range(matrix.shape[2]):
+        for positions in groups.values():
+            bad = [(dif, avg) for dif, avg in positions if keep[slc, dif, avg] == 0]
+            if len(bad) == len(positions):
+                print('All repetitions were rejected for slice %i, encoding %s; retaining the first shot.'
+                      % (slc + 1, positions[0][0] + 1))
+                bad = bad[1:]
+            for dif, avg in bad:
+                accepted[:, :, slc, dif, avg] = np.nan
     return accepted
 
 
@@ -596,30 +605,20 @@ def _rejection_result(original_matrix, original_bvals, original_bvecs, dictionar
         accepted_bvecs = np.asarray([encoding['bvec'] for encoding in accepted_encodings.values()])
         return [accepted_encodings, accepted_bvals, accepted_bvecs,
                 Slice_Crop_Coordinates, stats_by_encoding, keep_by_encoding]
-    ########## Identify new matrix dimensions ######################################################################################################
-    numRow                  = original_matrix.shape[0]                                                                   # Define number of rows (x)
-    numCol                  = original_matrix.shape[1]                                                                   # Define number of columns (y)
-    numSlc                  = keep_matrix_stacked.shape[0]                                                                   # Define number of slices (z)
-    (unique, index, counts) = np.unique(original_bvecs_stacked, return_counts = True, return_index = True, axis = 0)             # Extract number of different diffusion directions
-    unique                  = unique[np.argsort(index)]                                                                 # Retain stacked diffusion direction order
-    numDif                  = len(unique)                                                                               # Define number of diffusion directions
-    numAvg                  = max(counts)                                                                               # Define number of averages
-    keep_matrix_sorted = np.zeros([numSlc, numDif, numAvg])
-    stacked_index_list = []                                                                                        # Initialize stacked index list
-    for dif in range(numDif):                                                                                           # Iterate through diffusion directions
-        idxAvg = -1                                                                                                         # Initialize average index
-        for idx in range(keep_matrix_stacked.shape[1]):                                                                          # Iterate through stacked diffusion dimension
-            current_search = unique[dif]                                                                                        # Define current diffusion direction
-            if np.array_equal(current_search, original_bvecs_stacked[idx, :]) == True:                                                   # Check if current diff dir matches desired diff dir ...
-                idxAvg                                 = idxAvg + 1                                                                 # Index current average
-                idxDif                                 = np.where(np.all(unique == original_bvecs_stacked[idx, :],axis = 1))[0][0]           # Index current diffuion direction
-                keep_matrix_sorted[:, idxDif, idxAvg]  = keep_matrix_stacked[:, idx]                                               # Store sorted matrix from current index of
+    # sorted2stacked emits repetition-major volumes. Undo that layout directly;
+    # regrouping by b-vector loses shell identity and singleton-shot layouts.
+    numSlc, numDif, numAvg = original_matrix.shape[2:]
+    keep_matrix_stacked = np.asarray(keep_matrix_stacked)
+    if keep_matrix_stacked.shape != (numSlc, numDif * numAvg):
+        raise ValueError('Rejection decisions do not match the input image layout.')
+    keep_matrix_sorted = keep_matrix_stacked.reshape(numSlc, numAvg, numDif).swapaxes(1, 2)
     stats = np.zeros([keep_matrix_sorted.shape[0], keep_matrix_sorted.shape[1]])
     for slc in range(stats.shape[0]):
         for dif in range(stats.shape[1]):
             stats[slc, dif] = (np.sum(keep_matrix_sorted[slc, dif, :]) / keep_matrix_sorted.shape[2]) * 100
             print('Acceptance rate for slice %i, direction %i: %.1f%%' %(int(slc + 1), int(dif + 1), stats[slc, dif]))
-    accepted_matrix = _apply_sorted_keep(original_matrix, keep_matrix_sorted)
+    accepted_matrix = _apply_sorted_keep(
+        original_matrix, keep_matrix_sorted, original_bvals, original_bvecs)
     accepted_bvals = original_bvals
     accepted_bvecs = original_bvecs
     return[accepted_matrix, accepted_bvals, accepted_bvecs, Slice_Crop_Coordinates, stats, keep_matrix_sorted]
@@ -1000,8 +999,11 @@ def _load_rejection_configuration(directory, images, bvals, bvecs, operation_typ
         payload = json.loads(path.read_text())
         if (payload['image_shape'] != list(images.shape)
                 or payload['operation_type'] != operation_type
-                or not np.array_equal(payload['bvals'], bvals)
-                or not np.array_equal(payload['bvecs'], bvecs)):
+                or np.shape(payload['bvals']) != np.shape(bvals)
+                or np.shape(payload['bvecs']) != np.shape(bvecs)
+                or not np.allclose(payload['bvals'], bvals, rtol=0, atol=1e-12)
+                # Normalizing the same DICOM vectors can round differently across platforms.
+                or not np.allclose(payload['bvecs'], bvecs, rtol=0, atol=1e-12)):
             raise ValueError('Saved rejection configuration does not match the input geometry/encodings; use mode off to redo it.')
         coordinates = payload['crop_coordinates']
     else:

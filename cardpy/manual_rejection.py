@@ -110,6 +110,17 @@ def review_dataset(source, output_root=DEFAULT_OUTPUT, algorithm='Affine'):
         state = json.loads(state_path.read_text())
         if state['input'] != signature:
             raise ValueError(f'{directory}: input/settings changed; choose a new output folder.')
+        completed = state['completed_slices']
+        if (len(completed) != len(source_slices)
+                or state['source_slice_indices'] != source_slices
+                or np.asarray(state['keep']).shape != (len(source_slices), image.shape[3])):
+            raise ValueError(f'{state_path}: saved decisions do not match the input slices/shots.')
+        if all(completed):
+            print(f'{volunteer}/{series}: already complete; skipping.', flush=True)
+            return state
+        next_slice = source_slices[completed.index(False)] + 1
+        print(f'{volunteer}/{series}: resuming at source slice {next_slice}/{image.shape[2]} '
+              f'({sum(completed)}/{len(completed)} review slices saved).', flush=True)
         review_image = nib.load(review_path)
         expected = (image.shape[0], image.shape[1], len(source_slices), image.shape[3])
         if review_image.shape != expected:

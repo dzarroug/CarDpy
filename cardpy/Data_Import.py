@@ -5,8 +5,8 @@
 ### Reader notes:
 ###   * Sorting is driven by DICOM header content only. Files may be handed over in any order; file names are never trusted.
 ###   * Slices are indexed by sorted slice position, diffusion directions by first appearance in acquisition order, and
-###     averages by a per (slice, direction) repetition counter, so a skipped or corrupt image leaves a NaN hole instead
-###     of shifting every image after it.
+###     averages by enhanced acquisition identity when available, otherwise a per (slice, direction) counter.
+###     Missing acquisition/slice combinations remain NaN; repeated enhanced slots keep their first frame.
 ###   * Enhanced multi-frame, classic single-frame and Siemens mosaic layouts all flow through one code path.
 ###   * Output contract is unchanged: [matrix, b_vals, b_vecs, Header] with matrix (rows, columns, slices, volumes) and
 ###     volumes ordered as (direction index) + (average index * number of directions).
@@ -261,6 +261,18 @@ def _frame_diffusion(dcm, frame, Header, acquisition_order = 1):
                                _to_float(Header.get('B Vector 3'))]                             # Fall back to the header values
     return pe_pol, b_val, _reorient_gradient(orient, gradient)                               # Reorient the per-frame gradient
 
+def _frame_acquisition_key(dcm, frame):
+    """Identify an enhanced acquisition across split files; classic data keeps legacy indexing."""
+    if (0x5200, 0x9230) not in dcm:
+        return None
+    for path in [(0x52009230, frame, 0x00209111, 0, 0x00209128),  # Temporal Position Index
+                 (0x52009230, frame, 0x00209111, 0, 0x00209156),  # Frame Acquisition Number
+                 (0x00200012,)]:                                 # Acquisition Number
+        value = _to_float(_tag_value(dcm, *path))
+        if value > 0 and value < float('inf') and value.is_integer():
+            return (str(_tag_value(dcm, 0x0020000e, default = '')), int(value))
+    return None
+
 
 def _build_index(records, slice_order = 'ascending', averages = 'mode'):
     """
@@ -279,6 +291,7 @@ def _build_index(records, slice_order = 'ascending', averages = 'mode'):
                     'numAvg'       : Number of averages the matrix is sized for.
                     'assignments'  : List of (record, idxSlc, idxDir, idxAvg) for records that fit the matrix.
                     'dropped'      : List of (record, idxSlc, idxDir, idxAvg) for repetitions beyond numAvg.
+                    'duplicates'   : Later frames sharing an enhanced acquisition/slice/encoding slot (first kept).
     ########## Definition Information #############################################################################################################
     ### Sorting is driven entirely by DICOM header content, never by file order. Files may be supplied in any order and
     ### repetitions may be missing; a missing image leaves a NaN hole rather than shifting every later image.
@@ -298,16 +311,40 @@ def _build_index(records, slice_order = 'ascending', averages = 'mode'):
     for record in ordered:                                                                  # Iterate through records
         if record['dir_key'] not in dir_keys:                                                   # If the diffusion encoding is new ...
             dir_keys.append(record['dir_key'])                                                      # Append in order of appearance
-    ########## Count repetitions per slice and direction ###########################################################################################
-    counters = dict()                                                                       # Initialize per (slice, direction) repetition counter
-    staged   = []                                                                           # Initialize staged assignment list
-    for record in ordered:                                                                  # Iterate through records
-        idxSlc         = slice_values.index(record['slc_key'])                                  # Index current slice
-        idxDir         = dir_keys.index(record['dir_key'])                                      # Index current diffusion direction
-        pair           = (idxSlc, idxDir)                                                       # Identify the (slice, direction) pair
-        idxAvg         = counters.get(pair, 0)                                                  # Index current average within this pair
-        counters[pair] = idxAvg + 1                                                             # Advance the repetition counter for this pair
-        staged.append((record, idxSlc, idxDir, idxAvg))                                         # Stage the assignment
+    # Use acquisition identities shared across slices, rather than counting duplicate frames as averages.
+    # Constant/missing tags or acquisition numbers unique to individual slices keep legacy indexing.
+    by_direction = {}
+    for record in ordered:
+        by_direction.setdefault(record['dir_key'], []).append(record)
+    acquisition_ids = {}
+    for direction, group in by_direction.items():
+        keys = [record.get('acq_key') for record in group]
+        slices_by_acquisition = {}
+        for record in group:
+            slices_by_acquisition.setdefault(record.get('acq_key'), set()).add(record['slc_key'])
+        shared = len(slice_values) == 1 or any(len(slices) > 1 for slices in slices_by_acquisition.values())
+        if None not in keys and len(set(keys)) > 1 and shared:
+            acquisition_ids[direction] = sorted(set(keys))
+    counters = {}
+    staged = []
+    seen_slots = set()
+    duplicates = []
+    for record in ordered:
+        idxSlc = slice_values.index(record['slc_key'])
+        idxDir = dir_keys.index(record['dir_key'])
+        pair = (idxSlc, idxDir)
+        if record['dir_key'] in acquisition_ids:
+            idxAvg = acquisition_ids[record['dir_key']].index(record['acq_key'])
+        else:
+            idxAvg = counters.get(pair, 0)
+        counters[pair] = max(counters.get(pair, 0), idxAvg + 1)
+        slot = (idxSlc, idxDir, idxAvg)
+        item = (record, idxSlc, idxDir, idxAvg)
+        if record['dir_key'] in acquisition_ids and slot in seen_slots:
+            duplicates.append(item)
+        else:
+            staged.append(item)
+            seen_slots.add(slot)
     ########## Size the matrix #####################################################################################################################
     if len(counters) == 0:                                                                  # If no records were supplied ...
         numAvg = 0                                                                              # No averages
@@ -322,15 +359,16 @@ def _build_index(records, slice_order = 'ascending', averages = 'mode'):
         most   = max(tally.values())                                                            # Identify the most common tally
         numAvg = max(count for count, hits in tally.items() if hits == most)                    # Size to the modal count, preferring the larger on a tie
     ########## Split assignments that fit from repetitions that do not #############################################################################
-    assignments = [item for item in staged if item[3] < numAvg]                              # Keep assignments inside the matrix
-    dropped     = [item for item in staged if item[3] >= numAvg]                             # Record repetitions beyond numAvg
+    assignments = [item for item in staged if item[3] < numAvg]
+    dropped     = [item for item in staged if item[3] >= numAvg]
     return {'slice_values' : slice_values,
             'dir_keys'     : dir_keys,
             'numSlc'       : len(slice_values),
             'numDir'       : len(dir_keys),
             'numAvg'       : numAvg,
             'assignments'  : assignments,
-            'dropped'      : dropped}
+            'dropped'      : dropped,
+            'duplicates'   : duplicates}
 
 
 def DICOM_Reader(dcm_path, info = 'ON', slice_order = 'ascending', averages = 'mode'):
@@ -359,6 +397,8 @@ def DICOM_Reader(dcm_path, info = 'ON', slice_order = 'ascending', averages = 'm
     ### DICOM headers rather than from file order. B value and b vector grouping is quantized so floating point
     ### variation between repetitions of the same direction cannot split it into two directions.
     ###
+    ### Enhanced acquisition IDs preserve repetition slots across slices. A repeated acquisition/slice/encoding
+    ### slot keeps its first frame in header acquisition order; later frames are reported in the returned Header.
     ### Incomplete data: a missing image leaves a NaN volume and every other image keeps its slot with the correct
     ### b_val / b_vec, but a direction missing from the start of the series shifts later direction indices relative
     ### to a complete acquisition. Fitting is unaffected because b_vals and b_vecs travel with the matrix.
@@ -428,6 +468,7 @@ def DICOM_Reader(dcm_path, info = 'ON', slice_order = 'ascending', averages = 'm
                                 'slc_key'    : _to_float(slc_locs[frame]),
                                 'dir_key'    : _direction_key(pe_pol, b_val, b_vec),
                                 'order_key'  : (acq_order, float(frame), float(ii)),
+                                'acq_key'    : _frame_acquisition_key(ds, frame),
                                 'b_val'      : b_val,
                                 'b_vec'      : b_vec})                                                   # Append one record per frame
         else:                                                                                   # Or if there is one slice per matrix ...
@@ -438,6 +479,7 @@ def DICOM_Reader(dcm_path, info = 'ON', slice_order = 'ascending', averages = 'm
                             'slc_key'    : _to_float(slc_locs[0]) if len(slc_locs) else 0.0,
                             'dir_key'    : _direction_key(pe_pol, b_val, b_vec),
                             'order_key'  : (acq_order, 0.0, float(ii)),
+                            'acq_key'    : _frame_acquisition_key(ds, 0),
                             'b_val'      : b_val,
                             'b_vec'      : b_vec})                                                   # Append one record per DICOM
     if Header is None:                                                                      # If no DICOM could be read ...
@@ -465,6 +507,18 @@ def DICOM_Reader(dcm_path, info = 'ON', slice_order = 'ascending', averages = 'm
                            '\n  (Siemens TENSOR / Raw Data objects have no pixel data).')        # Report rather than return an empty matrix
     ########## Sort Records into Slices, Directions and Averages ###################################################################################
     index  = _build_index(records, slice_order = slice_order, averages = averages)           # Build the sorted layout from header content
+    Header = dict(Header)
+    Header['DICOM Duplicate Frames'] = [
+        {'file': dcmPath[record['file_index']], 'frame': record['frame'] + 1,
+         'acquisition': record['acq_key'][1], 'slice_location': record['slc_key'],
+         'direction_index': idxDir, 'average_index': idxAvg}
+        for record, idxSlc, idxDir, idxAvg in index['duplicates']]
+    if index['duplicates']:
+        import warnings
+        warnings.warn('Ignored ' + str(len(index['duplicates'])) + ' repeated frame(s) for an existing '
+                      'acquisition/slice/encoding slot; kept the first occurrence. '
+                      'Sources are listed in Header["DICOM Duplicate Frames"].',
+                      RuntimeWarning, stacklevel = 2)
     numSlc = index['numSlc']                                                                # Extract number of slices
     numDir = index['numDir']                                                                # Extract number of diffusion directions
     numAvg = index['numAvg']                                                                # Extract number of averages
