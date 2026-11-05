@@ -38,6 +38,31 @@ class ShotMetadata:
                 self.decisions[(index[0], source)] = dict(
                     rejection_accepted=accepted, retained_as_fallback=fallback)
 
+    def replace(self, replacements, bvals, bvecs, individual=False):
+        """Carry donor provenance into filled slots while preserving decisions."""
+        if not replacements:
+            return
+        entries = self.regroup(bvals, bvecs) if individual else None
+        groups = list(entries.values()) if entries is not None else None
+        for item in replacements:
+            slc, dif, rep = (item[k] for k in ('slice_index', 'encoding_index', 'repetition_index'))
+            layout = groups[dif]['images'] if individual else self.layout[:, :, :, dif, :]
+            donors = item['donor_repetition_indices']
+            if item.get('retained_as_fallback'):
+                for key in layout[0, 0, slc]:
+                    for source in self.groups.get(int(key), []):
+                        decision = self.decisions.get((slc, source))
+                        if decision is not None:
+                            decision['retained_as_fallback'] = False
+                for key in layout[0, 0, slc, donors]:
+                    for source in self.groups.get(int(key), []):
+                        decision = self.decisions.get((slc, source))
+                        if decision is not None:
+                            decision['retained_as_fallback'] = True
+            layout[0, 0, slc, rep] = self._merge(layout[0, 0, slc, donors])
+        if individual:
+            self.from_encodings(entries)
+
     def regroup(self, bvals, bvecs):
         return sorted2dictionary(self.layout, bvals, bvecs)
 

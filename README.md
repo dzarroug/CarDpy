@@ -102,3 +102,61 @@ Action Tasks:
 - New registration WIP
 - New Gibb's Ringing Correction 
 - New data loading algorithm
+
+
+## Missing shots and replacement
+
+`cardpy.pipeline.process` accepts two independent configuration sections:
+
+```python
+config['missing_shots'] = {'policy': 'reject'}
+config['shot_replacement'] = {
+    'method': 'random_valid',
+    'seed': 0,
+    'all_rejected': 'error',
+}
+```
+
+Missing-shot policies:
+- `error`: stop on missing/nonfinite input shots (general pipeline default).
+- `reject`: retain missing slots as NaN through Gibbs removal and registration,
+  exclude them from rejection scoring, and force their keep decisions to zero.
+  Requires rejection enabled.
+- `replace`: fill missing inputs before processing, using `shot_replacement.method`.
+  Requires a method other than `none`. Filled inputs participate in later scoring.
+
+Replacement methods apply after rejection, and at input for policy `replace`:
+- `none`: leave rejected/missing slots as NaN; subsequent averaging uses the available repetitions.
+- `random_valid`: copy a random accepted repetition.
+- `first_valid`: copy the first accepted repetition.
+- `mean_valid`: fill with the mean of accepted repetitions.
+
+Donors always share the target slice and diffusion encoding (b-value plus
+b-vector). Missing shots are never scored or used as donors. A partially
+nonfinite input image is treated as an unavailable whole shot. This does not
+apply to voxel-wise masks introduced later by ADC filtering.
+
+`seed` makes random donor selection reproducible; `None` uses NumPy's global
+RNG. It does not seed rejection clustering or other algorithms. If every
+measured repetition is rejected, `all_rejected='error'` stops processing;
+`'first_valid'` explicitly retains the first measured shot as a rejected
+fallback. The general pipeline defaults to `method='none'` and
+`all_rejected='first_valid'`, preserving its prior rejection behavior.
+
+Gibbs removal processes present images only. Missing-shot registration supports
+2D with temporary denoising OFF; it skips absent moving images and uses an
+available measured lowest-b reference without filling the missing slot. A
+slice without any lowest-b reference fails clearly. Use input replacement for
+3D registration or temporary denoising. Missing encodings without any measured
+repetition cannot be recovered and fail clearly.
+
+When saving, `Shot_Replacements.json` records zero-based target and donor
+indices, method, stage, encoding, and fallback status. Shot provenance follows
+the donors. Copies and mean fills do not add independent measurements and can
+change weighting during subsequent averaging. For missing inputs, rejection
+runs per slice with compact measured-only arrays; diagnostics are under
+`Missing_Shot_Rejection/Slice_*/13_Diagnostics` and decision indices there refer
+to the compact arrays. The replacement audit uses the original layout.
+
+Direct `shot_rejection` calls also accept `replacement_method`,
+`replacement_seed`, `all_rejected`, and a mutable `replacement_log` list.

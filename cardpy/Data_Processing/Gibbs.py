@@ -1,4 +1,4 @@
-def unrung(original_matrix, original_bvals, original_bvecs, operation_type = 'Magnitude'):
+def _unrung_complete(original_matrix, original_bvals, original_bvecs, operation_type = 'Magnitude'):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).
@@ -55,3 +55,10 @@ def unrung(original_matrix, original_bvals, original_bvecs, operation_type = 'Ma
     unrung_bvals          = original_bvals                                                                              # Store unrung b-values
     unrung_bvecs          = original_bvecs                                                                              # Store unrung b-vectors
     return [unrung_matrix, unrung_bvals, unrung_bvecs]
+
+
+def unrung(original_matrix, original_bvals, original_bvecs, operation_type='Magnitude'):
+    """Remove Gibbs ringing from present images, leaving missing shots as NaN."""
+    from cardpy.shot_handling import unrung_present
+    return unrung_present(_unrung_complete, original_matrix, original_bvals,
+                          original_bvecs, operation_type=operation_type)

@@ -15,7 +15,9 @@ from copy import deepcopy
 SMART_HEALTH_CONFIG = {'gui': {'version': 'v2', 'saved_configuration_mode': 'off'},
  'gibbs': {'enabled': True},
  'rejection': {'enabled': True,
-               'mode': 'algorithm',
+               'mode': 'algorithm',  # algorithm / manual / ml
+               'ml_model_path': None,
+               'ml_threshold': None,
                'manual_review': False,
                'nrmse_threshold': 0.75,
                'nssim_threshold': 0.75,
@@ -31,7 +33,10 @@ SMART_HEALTH_CONFIG = {'gui': {'version': 'v2', 'saved_configuration_mode': 'off
                   'mode': '2D',
                   'temporary_denoising': 'OFF'},
  'adc_filter': {'enabled': True, 'reference': 'paired', 'max_diffusivity': 3.0},
- 'missing_shots': {'policy': 'random_valid'},
+ # error / reject (fill at rejection) / replace (fill at import)
+ 'missing_shots': {'policy': 'reject'},
+ # none / random_valid / first_valid / mean_valid
+ 'shot_replacement': {'method': 'random_valid', 'seed': None, 'all_rejected': 'error'},
  'averaging': {'enabled': True},
  'denoising': {'enabled': True, 'number_of_coils': 20, 'algorithm': 'LocalPCA'},
  'interpolation': {'enabled': True},
@@ -54,4 +59,7 @@ def get_config(workflow="blip"):
     config = deepcopy(SMART_HEALTH_CONFIG)
     config["smart_health"]["workflow"] = workflow
     config["data_type"] = "NifTis" if workflow == "topup" else "DICOM"
+    if workflow == "topup":
+        # TOPUP resumes after rejection: refuse incomplete corrected input.
+        config["missing_shots"]["policy"] = "error"
     return config

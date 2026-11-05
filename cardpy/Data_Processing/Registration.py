@@ -102,8 +102,18 @@ def register(original_matrix, original_bvals, original_bvecs,
     if len(level_iters) != 3 or any(int(value) != value or value <= 0 for value in level_iters):
         raise ValueError('level_iters must contain three positive integer iteration counts.')
     data = np.abs(data) if operation_type == 'Magnitude' else data
-    if not np.isfinite(data).all():
-        raise ValueError('Registration signals must be finite.')
+    available = np.isfinite(data).all(axis=(0, 1))
+    missing = ~available
+    if missing.any():
+        if mode != '2D' or temporary_denoising != 'OFF':
+            raise ValueError('Missing-shot registration requires mode=2D and temporary_denoising=OFF.')
+        if np.isinf(data).any() or np.any(np.isfinite(data).any(axis=(0, 1)) & missing):
+            raise ValueError('Only wholly NaN shots can be skipped during registration.')
+        if not available[:, bvals == np.min(bvals), :].any(axis=(1, 2)).all():
+            raise ValueError('All lowest-b registration references are missing in a slice.')
+        data = np.array(data, copy=True)
+        data[:, :, missing] = 0  # Empty moving images are skipped below, never copied.
+
     guide = np.abs(data)
     if temporary_denoising == 'ON':
         from cardpy.Data_Processing.Denoising import denoise
@@ -121,14 +131,27 @@ def register(original_matrix, original_bvals, original_bvecs,
     print('Registering %s data to lowest b-value (%g).' % (mode, bvals[reference]))
     for slc in spatial_indices:
         spatial = (slice(None), slice(None), slc) if mode == '2D' else (slice(None),) * 3
-        first = guide[spatial + (reference, 0)]
+        first_reference, first_average = reference, 0
+        if missing.any():
+            candidates = np.argwhere(available[slc] & (bvals == np.min(bvals))[:, None])
+            # Prefer repetition zero, then the first available lowest-b shot.
+            candidates = sorted(candidates.tolist(), key=lambda pair: (pair[1], pair[0]))
+            first_reference, first_average = candidates[0]
+        first = guide[spatial + (first_reference, first_average)]
         if not np.any(first > 0):
             raise ValueError('The lowest-b registration reference is empty.')
         for avg in range(data.shape[4]):
-            static = guide[spatial + (reference, avg)]
+            repetition_reference, reference_average = reference, avg
+            if missing.any() and not available[slc, reference, avg]:
+                choices = np.flatnonzero(available[slc, :, avg] & (bvals == np.min(bvals)))
+                if len(choices):
+                    repetition_reference = int(choices[0])
+                else:
+                    repetition_reference, reference_average = first_reference, first_average
+            static = guide[spatial + (repetition_reference, reference_average)]
             if not np.any(static > 0):
                 raise ValueError('A lowest-b registration reference is empty.')
-            average_map = None if avg == 0 or np.array_equal(first, static) else _estimate_transform(
+            average_map = None if np.array_equal(first, static) else _estimate_transform(
                 first, static, registration_algorithm, grid, level_iters)
             for dif in range(data.shape[3]):
                 index = spatial + (dif, avg)
@@ -136,7 +159,7 @@ def register(original_matrix, original_bvals, original_bvecs,
                 if not np.any(moving > 0):
                     registered[index] = signal
                     continue
-                direction_map = None if dif == reference or np.array_equal(static, moving) else _estimate_transform(
+                direction_map = None if (dif == repetition_reference and avg == reference_average) or np.array_equal(static, moving) else _estimate_transform(
                     static, moving, registration_algorithm, grid, level_iters)
                 if direction_map is not None and average_map is not None and registration_algorithm != 'Elastic':
                     # Pullback: first reference -> repetition reference -> image.
@@ -152,4 +175,5 @@ def register(original_matrix, original_bvals, original_bvecs,
                     if average_map is not None:
                         signal = _apply_transform(average_map, signal)
                 registered[index] = signal
+    registered[:, :, missing] = np.nan
     return [registered, original_bvals, original_bvecs]

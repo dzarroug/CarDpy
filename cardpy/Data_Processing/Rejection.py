@@ -56,7 +56,7 @@ def _apply_sorted_keep(matrix, keep, bvals=None, bvecs=None):
     return accepted
 
 
-def shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON',IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off", rejection_mode = 'algorithm', ml_model_path = None, ml_threshold = None, ml_input = None): 
+def _shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON',IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off", rejection_mode = 'algorithm', ml_model_path = None, ml_threshold = None, ml_input = None):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
@@ -1034,3 +1034,46 @@ def _load_rejection_configuration(directory, images, bvals, bvecs, operation_typ
         if keep.shape != images.shape[2:] or not np.isin(keep, [0, 1]).all():
             raise ValueError('Saved rejection decisions do not match slices/acquisitions.')
     return bounds.astype(int).tolist(), automatic, final
+
+
+def shot_rejection(original_matrix, original_bvals, original_bvecs, *args,
+                   replacement_method='none', all_rejected='first_valid',
+                   replacement_seed=None, replacement_log=None, **kwargs):
+    """Reject measured shots, force missing shots rejected, then optionally fill.
+
+    Replacement choices: none, random_valid, first_valid, mean_valid. Donors
+    always come from the same slice and encoding. A missing image is never
+    scored, accepted, or used as a donor. Return layout and keep masks match
+    the input, including missing positions.
+    """
+    import inspect
+    import numpy as np
+    from cardpy.shot_handling import validate_options, reject_missing_shots, replace_shots
+    validate_options(replacement=dict(method=replacement_method,
+        all_rejected=all_rejected, seed=replacement_seed))
+    if args:
+        bound = inspect.signature(_shot_rejection).bind(
+            original_matrix, original_bvals, original_bvecs, *args, **kwargs)
+        kwargs = {k: v for k, v in bound.arguments.items()
+                  if k not in ('original_matrix', 'original_bvals', 'original_bvecs')}
+    dictionary = isinstance(original_matrix, dict)
+    arrays = [e['images'] for e in original_matrix.values()] if dictionary else [original_matrix]
+    missing = any(not np.isfinite(a).all() for a in arrays)
+    if missing:
+        coordinates, stats, keep = reject_missing_shots(
+            _shot_rejection, original_matrix, original_bvals, original_bvecs, kwargs)
+        bb = np.asarray([e['bval'] for e in original_matrix.values()]) if dictionary else original_bvals
+        vv = np.asarray([e['bvec'] for e in original_matrix.values()]) if dictionary else original_bvecs
+        result = [None, bb, vv, coordinates, stats, keep]
+    else:
+        result = _shot_rejection(original_matrix, original_bvals, original_bvecs, **kwargs)
+    if missing or replacement_method != 'none' or all_rejected != 'first_valid':
+        result[0] = replace_shots(original_matrix, original_bvals, original_bvecs,
+            result[5], method=replacement_method, all_rejected=all_rejected,
+            seed=replacement_seed, log=replacement_log)
+        if kwargs.get('operation_type', 'Magnitude') == 'Magnitude' and any(np.iscomplexobj(a) for a in arrays):
+            if dictionary:
+                result[0] = {k: {**e, 'images': np.abs(e['images'])} for k, e in result[0].items()}
+            else:
+                result[0] = np.abs(result[0])
+    return result

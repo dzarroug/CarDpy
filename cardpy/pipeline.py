@@ -4,6 +4,7 @@ import json
 import numpy as np
 from cardpy.workflow_state import write_processing_status
 from cardpy.shot_metadata import ShotMetadata
+from cardpy.shot_handling import validate_options, prepare_missing_shots
 
 warnings.filterwarnings('ignore', module='dipy')
 warnings.filterwarnings('ignore', module='sklearn')
@@ -188,6 +189,18 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
                       if isinstance(value, np.ndarray) else os.fspath(value))
         write_processing_status(out_path, "running")
 
+    missing_options = config.get('missing_shots', {})
+    replacement_options = config.get('shot_replacement', {})
+    missing_policy, replacement_method = validate_options(missing_options, replacement_options)
+    if missing_policy == 'reject' and not config['rejection']['enabled']:
+        raise ValueError('missing_shots.policy=reject requires rejection.enabled=True.')
+    replacement_log = []
+
+    def save_replacements():
+        if save:
+            with open(os.path.join(out_path, 'Shot_Replacements.json'), 'w') as stream:
+                json.dump(dict(schema_version=1, index_base=0, replacements=replacement_log), stream, indent=2)
+
     op       = config["operation_type"]
     complex_real_signal = op == 'Complex'
     reg_alg  = config["registration"]["algorithm"]
@@ -281,6 +294,15 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
                             operation_type=op, mode=reg_mode, voxel_size=spacing,
                             b0_threshold=b0_threshold)
     _save_stage('Original', m, b, v, Header)
+    prepared = prepare_missing_shots(sorted2dictionary(m, b, v) if dictionary_processing else m,
+        b, v, missing_options, replacement_options, log=replacement_log)
+    if dictionary_processing:
+        m, b, v = dictionary2sorted(prepared, mode='individual')
+    else:
+        m = prepared
+    if shot_metadata is not None:
+        shot_metadata.replace(replacement_log, b, v, individual=dictionary_processing)
+    save_replacements()
 
     aligned = False
 
@@ -298,6 +320,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         m2, b2, v2 = register(m, b, v, **register_options)
         aligned = True
         rejection_input = sorted2dictionary(m2, b2, v2) if dictionary_processing else m2
+        replacement_start = len(replacement_log)
         m, b, v, Slice_Coordinates, stats, keep = shot_rejection(
             rejection_input, b2, v2,
             NRMSE_threshold=r["nrmse_threshold"], NSSIM_threshold=r["nssim_threshold"],
@@ -308,7 +331,11 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             saved_configuration_mode=r.get('saved_configuration_mode', saved_mode), rejection_mode=r.get("mode", "algorithm"),
             ml_model_path=r.get("ml_model_path"),
             ml_threshold=r.get("ml_threshold"),
-            ml_input=m)
+            ml_input=m,
+            replacement_method=replacement_method,
+            all_rejected=replacement_options.get('all_rejected', 'first_valid'),
+            replacement_seed=replacement_options.get('seed'),
+            replacement_log=replacement_log)
         if gui_version == 'v2' and len(Slice_Coordinates) == 4:
             segmentation_crop = Slice_Coordinates
             crop_shape = m2.shape[:2]
@@ -316,6 +343,8 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
             m, b, v = dictionary2sorted(m, mode='individual')
         if shot_metadata is not None:
             shot_metadata.reject(keep, b2, v2)
+            shot_metadata.replace(replacement_log[replacement_start:], b2, v2, individual=dictionary_processing)
+        save_replacements()
         _save_stage('Rejected', m, b, v, Header)
         if save:
             diag_dir = os.path.join(out_path, '13_Diagnostics')

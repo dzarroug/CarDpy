@@ -10,6 +10,16 @@ DEFAULT_CONFIG = {
     "dicom_subpath":    "02_cDTI/SAX/cDTI_SF_b350_RL_71",   # path to DICOM series inside study folder
     "slice_index":      [3],           # list of slice indices, or None for all
 
+    ### ---- Whole-shot availability and replacement ----
+    "missing_shots": {
+        "policy": "error",  # error / reject (defer until rejection) / replace (at input)
+    },
+    "shot_replacement": {
+        "method": "none",  # none / random_valid / first_valid / mean_valid
+        "seed": None,      # reproducible random donors; None uses NumPy global RNG
+        "all_rejected": "first_valid",  # error / first_valid (explicit rejected fallback)
+    },
+
     ### ---- Interactive tools ----
     "gui": {
         "saved_configuration_mode": "off",  # off / reuse (no saved GUIs) / review (prefill GUIs)

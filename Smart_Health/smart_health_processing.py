@@ -6,6 +6,7 @@ Gibbs removal, shot rejection, or respiratory sorting.
 """
 import os
 import numpy as np
+from cardpy.shot_handling import prepare_missing_shots, validate_options
 from cardpy.Data_Sorting import stacked2sorted
 from cardpy.Data_Saving import Save_Diffusion_Image_Data, Save_Primary_Eigenvector_Data
 from cardpy.Data_Processing.Gibbs import unrung
@@ -139,10 +140,26 @@ def _legacy_replacements(matrix, keep):
 
 
 def shot_rejection(original_matrix, original_bvals, original_bvecs, **kwargs):
-    """Use the new rejection UI/decisions and the original replacement behavior."""
-    result = _cardpy_shot_rejection(original_matrix, original_bvals, original_bvecs, **kwargs)
-    accepted = _legacy_replacements(original_matrix, result[5])
-    return [accepted, result[1], result[2], result[3]]
+    """Use shared CardPy decisions and configurable shot replacement."""
+    return _cardpy_shot_rejection(original_matrix, original_bvals, original_bvecs, **kwargs)[:4]
+
+
+def _prepare_shots(matrix, bvals, bvecs, settings, out_path):
+    import json
+    policy = settings.get('missing_shots_policy', 'reject')
+    replacement = settings.get('shot_replacement', {'method': 'random_valid', 'all_rejected': 'error'})
+    log = []
+    prepared = prepare_missing_shots(matrix, bvals, bvecs, {'policy': policy}, replacement, log=log)
+    os.makedirs(out_path, exist_ok=True)
+    with open(os.path.join(out_path, 'Shot_Replacements.json'), 'w') as stream:
+        json.dump(dict(schema_version=1, index_base=0, replacements=log), stream, indent=2)
+    return prepared, log
+
+
+def _save_shot_replacements(out_path, log):
+    import json
+    with open(os.path.join(out_path, 'Shot_Replacements.json'), 'w') as stream:
+        json.dump(dict(schema_version=1, index_base=0, replacements=log), stream, indent=2)
 
 
 def _process_blip(input_data, out_path, settings, gui_version="v2"):
@@ -185,9 +202,8 @@ def _process_blip(input_data, out_path, settings, gui_version="v2"):
     Save_Diffusion_Image_Data(output_path, file_name, Header, temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted)
     del counter_string, folder, output_path
     del temporary_matrix_stacked, temporary_bvals_stacked, temporary_bvecs_stacked
-    temporary_matrix_sorted = _replace_missing_shots(
-        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted,
-        out_path, policy=settings.get('missing_shots_policy', 'random_valid'))
+    temporary_matrix_sorted, replacement_log = _prepare_shots(
+        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted, settings, out_path)
     if Gibbs_Mode == 'ON':
         counter        = counter + 1
         counter_string = str(counter)
@@ -221,6 +237,17 @@ def _process_blip(input_data, out_path, settings, gui_version="v2"):
         [rejected_matrix_sorted, rejected_bvals_sorted, rejected_bvecs_sorted, Slice_Coordinates] = shot_rejection(registered_matrix_sorted,
                                                                                                                    registered_bvals_sorted,
                                                                                                                    registered_bvecs_sorted,
+                                                                                                                   rejection_mode = settings.get('rejection_mode', 'algorithm'),
+                                                                                                                   manual_review = settings.get('rejection_manual_review', False),
+                                                                                                                   saved_configuration_mode = settings.get('rejection_saved_mode', 'off'),
+                                                                                                                   ml_model_path = settings.get('rejection_ml_model_path'),
+                                                                                                                   ml_threshold = settings.get('rejection_ml_threshold'),
+                                                                                                                   ml_input = temporary_matrix_sorted,
+                                                                                                                   replacement_method = settings.get('shot_replacement', {}).get('method', 'random_valid'),
+                                                                                                                   all_rejected = settings.get('shot_replacement', {}).get('all_rejected', 'error'),
+                                                                                                                   replacement_seed = settings.get('shot_replacement', {}).get('seed'),
+                                                                                                                   replacement_log = replacement_log,
+                                                                                                                   diagnostics_path = out_path,
                                                                                                                    NRMSE_threshold = NRMSE_Threshold,
                                                                                                                    NSSIM_threshold = NSSIM_Threshold,
                                                                                                                gui_version = gui_version,
@@ -229,6 +256,7 @@ def _process_blip(input_data, out_path, settings, gui_version="v2"):
                                                                                                                    operation_type  = operation_type)[:4]
         output_path = os.path.join(out_path, folder)
         Save_Diffusion_Image_Data(output_path, 'Rejected', Header, rejected_matrix_sorted, rejected_bvals_sorted, rejected_bvecs_sorted)
+        _save_shot_replacements(out_path, replacement_log)
         temporary_matrix_sorted = rejected_matrix_sorted
         temporary_bvals_sorted  = rejected_bvals_sorted
         temporary_bvecs_sorted  = rejected_bvecs_sorted
@@ -429,9 +457,8 @@ def _process_topup(input_data, out_path, settings, gui_version="v2"):
     sub_registration = settings['sub_registration']
     Header = dict(input_data[3])
     temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted = stacked2sorted(*input_data[:3])
-    temporary_matrix_sorted = _replace_missing_shots(
-        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted,
-        out_path, policy=settings.get('missing_shots_policy', 'random_valid'))
+    temporary_matrix_sorted, replacement_log = _prepare_shots(
+        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted, settings, out_path)
     counter = 12
     if Registration_Mode == 'ON':
         counter        = counter + 1
@@ -589,8 +616,17 @@ def _settings_from_config(config):
 
     if config['adc_filter'].get('reference', 'paired') not in ('paired', 'pooled'):
         raise ValueError("adc_filter.reference must be 'paired' or 'pooled'.")
-    if config.get('missing_shots', {}).get('policy', 'random_valid') not in ('random_valid', 'error'):
-        raise ValueError("missing_shots.policy must be 'random_valid' or 'error'.")
+    policy = config.get('missing_shots', {}).get('policy', 'reject' if config['smart_health']['workflow'] == 'blip' else 'error')
+    # Accept the prior Smart Health spelling for existing notebooks.
+    if policy == 'random_valid':
+        policy = 'replace'
+    replacement = config.get('shot_replacement', {'method': 'random_valid', 'all_rejected': 'error'})
+    validate_options({'policy': policy}, replacement)
+    if policy == 'reject' and (not config['rejection']['enabled'] or config['smart_health']['workflow'] != 'blip'):
+        raise ValueError('Deferred missing shots require the Blip workflow with rejection enabled.')
+    rejection_mode = config['rejection'].get('mode', 'algorithm')
+    if rejection_mode not in ('algorithm', 'manual', 'ml'):
+        raise ValueError('rejection.mode must be algorithm, manual, or ml.')
     algorithm = config['registration']['algorithm']
     if algorithm not in ('Affine', 'Rigid', 'Translation'):
         raise ValueError('The original workflow supports Affine, Rigid, or Translation.')
@@ -604,6 +640,11 @@ def _settings_from_config(config):
         'operation_type': config['operation_type'],
         'Gibbs_Mode': flag('gibbs'),
         'Rejection_Mode': flag('rejection'),
+        'rejection_mode': rejection_mode,
+        'rejection_manual_review': config['rejection'].get('manual_review', False),
+        'rejection_saved_mode': config['rejection'].get('saved_configuration_mode', config.get('gui', {}).get('saved_configuration_mode', 'off')),
+        'rejection_ml_model_path': config['rejection'].get('ml_model_path'),
+        'rejection_ml_threshold': config['rejection'].get('ml_threshold'),
         'NRMSE_Threshold': config['rejection']['nrmse_threshold'],
         'NSSIM_Threshold': config['rejection']['nssim_threshold'],
         'rejection_zoom': config['rejection']['zoom'],
@@ -619,7 +660,8 @@ def _settings_from_config(config):
         'ADC_Filter_Mode': flag('adc_filter'),
         'ADC_reference': config['adc_filter'].get('reference', 'paired'),
         'ADC_max_diffusivity': config['adc_filter'].get('max_diffusivity', 3.0),
-        'missing_shots_policy': config.get('missing_shots', {}).get('policy', 'random_valid'),
+        'missing_shots_policy': policy,
+        'shot_replacement': dict(replacement),
         'Averaging_Mode': flag('averaging'),
         'Denoising_Mode': flag('denoising'),
         'number_of_coils': config['denoising']['number_of_coils'],
