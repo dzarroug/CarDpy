@@ -12,13 +12,102 @@ from cardpy.Data_Processing.Gibbs import unrung
 from cardpy.Data_Processing.Registration import register
 from cardpy.Data_Processing.Rejection import shot_rejection as _cardpy_shot_rejection
 from cardpy.Data_Processing.Respiratory import respiratory_sorting
-from cardpy.Data_Processing.Diffusivity import ADC_Filter
+from cardpy.Data_Processing.Diffusivity import ADC_Filter as _cardpy_ADC_Filter
 from cardpy.Data_Processing.Averaging import average
 from cardpy.Data_Processing.Denoising import denoise
 from cardpy.Data_Processing.Interpolation import zero_filled
 from cardpy.Data_Processing.Segmentation_Matrix_DTI import DTI_segmentation_matrix
 
 SETTING_KEYS = ('data_type', 'DICOM_reader_info', 'operation_type', 'Gibbs_Mode', 'Rejection_Mode', 'NRMSE_Threshold', 'NSSIM_Threshold', 'rejection_zoom', 'rejection_IntEACT_zoom', 'rejection_organ', 'Respiratory_Mode', 'respiratory_zoom', 'respiratory_IntERACT_zoom', 'respiratory_organ', 'Registration_Mode', 'registration_algorithm', 'temporary_denoising', 'ADC_Filter_Mode', 'Averaging_Mode', 'Denoising_Mode', 'number_of_coils', 'denoising_algorithm', 'Interpolation_Mode', 'Extended_Matrix_Mode', 'E1_Mode', 'sub_registration')
+
+
+def ADC_Filter(original_matrix, original_bvals, original_bvecs,
+               operation_type='Magnitude', reference='paired', max_diffusivity=3.0):
+    """Legacy paired-reference ADC; pixel NaNs are left for averaging.
+
+    Paired mode uses the first lowest-b encoding and full b-value span,
+    retaining all tied minima when every repetition fails the threshold.
+    """
+    if reference == 'pooled':
+        return _cardpy_ADC_Filter(original_matrix, original_bvals, original_bvecs,
+            operation_type=operation_type, max_diffusivity=max_diffusivity)
+    if reference != 'paired':
+        raise ValueError("adc_filter.reference must be 'paired' or 'pooled'.")
+    if operation_type not in ('Magnitude', 'Complex'):
+        raise ValueError('operation_type must be Magnitude or Complex.')
+    if not np.isfinite(max_diffusivity) or max_diffusivity <= 0:
+        raise ValueError('max_diffusivity must be positive and finite.')
+    data = np.asarray(original_matrix)
+    bvals = np.asarray(original_bvals, dtype=float)
+    if (data.ndim != 5 or any(size == 0 for size in data.shape)
+            or bvals.shape != (data.shape[3],) or not np.isfinite(bvals).all()
+            or len(np.unique(bvals)) < 2):
+        raise ValueError('Paired ADC requires nonempty 5D data and at least two finite b-value shells.')
+    filtered = np.array(data, dtype=np.complex128 if np.iscomplexobj(data) else float, copy=True)
+    low = int(np.argmin(bvals))
+    magnitude = np.abs(data)
+    baseline = magnitude[..., low, :]
+    span = float(bvals.max() - bvals.min())
+    for dif, bval in enumerate(bvals):
+        if bval == bvals[low]:
+            continue
+        with np.errstate(divide='ignore', invalid='ignore'):
+            adc = (-1.0 / span) * np.log(magnitude[..., dif, :] / baseline) * 1000
+        rejected = adc >= max_diffusivity
+        all_rejected = np.all(rejected, axis=-1, keepdims=True)
+        minimum = np.min(adc, axis=-1, keepdims=True)
+        rejected &= ~(all_rejected & (adc == minimum))
+        filtered[..., dif, :][rejected] = np.nan
+    return [filtered, original_bvals, original_bvecs]
+
+
+def _replace_missing_shots(matrix, bvals, bvecs, out_path, policy='random_valid'):
+    """Replace nonfinite input shots before processing and record original donors.
+
+    Any nonfinite pixel makes a shot unavailable. Donors must be wholly finite
+    and belong to the same slice and encoding. NumPy's global RNG is used.
+    This is input preparation, never a replacement for ADC pixel filtering.
+    """
+    import json
+    import tempfile
+    if policy not in ('random_valid', 'error'):
+        raise ValueError("missing_shots.policy must be 'random_valid' or 'error'.")
+    data = np.asarray(matrix)
+    bvals, bvecs = np.asarray(bvals), np.asarray(bvecs)
+    if (data.ndim != 5 or any(size == 0 for size in data.shape)
+            or bvals.shape != (data.shape[3],) or bvecs.shape != (data.shape[3], 3)
+            or not np.isfinite(bvals).all() or not np.isfinite(bvecs).all()):
+        raise ValueError('Missing-shot replacement requires nonempty 5D data and finite matching encodings.')
+    valid = np.isfinite(data).all(axis=(0, 1))
+    for slc, dif in np.argwhere(~valid.all(axis=-1)):
+        if not valid[slc, dif].any():
+            raise ValueError(f'No valid donor for slice {slc + 1}, encoding {dif + 1}; all input repetitions are missing/nonfinite.')
+    if policy == 'error' and not valid.all():
+        raise ValueError('Input contains missing/nonfinite shots; missing_shots.policy is error.')
+    filled = np.array(data, copy=True)
+    replacements = []
+    for slc, dif, repetition in np.argwhere(~valid):
+        donor = int(np.random.choice(np.flatnonzero(valid[slc, dif])))
+        filled[:, :, slc, dif, repetition] = data[:, :, slc, dif, donor]
+        replacements.append(dict(slice_index=int(slc), encoding_index=int(dif),
+            repetition_index=int(repetition), donor_repetition_index=donor,
+            bval=float(bvals[dif]), bvec=bvecs[dif].tolist()))
+    os.makedirs(out_path, exist_ok=True)
+    path = os.path.join(out_path, 'Missing_Shot_Replacements.json')
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', dir=out_path,
+                prefix='.missing-shots-', suffix='.tmp', delete=False) as stream:
+            temporary = stream.name
+            json.dump(dict(schema_version=1, index_base=0, policy=policy,
+                input_shape=list(data.shape), replacements=replacements), stream, indent=2)
+            stream.write('\n')
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)
+    return filled
+
 
 def _legacy_replacements(matrix, keep):
     """Fill rejected positions with random accepted shots, as in legacy CardPy."""
@@ -96,6 +185,9 @@ def _process_blip(input_data, out_path, settings, gui_version="v2"):
     Save_Diffusion_Image_Data(output_path, file_name, Header, temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted)
     del counter_string, folder, output_path
     del temporary_matrix_stacked, temporary_bvals_stacked, temporary_bvecs_stacked
+    temporary_matrix_sorted = _replace_missing_shots(
+        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted,
+        out_path, policy=settings.get('missing_shots_policy', 'random_valid'))
     if Gibbs_Mode == 'ON':
         counter        = counter + 1
         counter_string = str(counter)
@@ -203,6 +295,8 @@ def _process_blip(input_data, out_path, settings, gui_version="v2"):
         [filtered_matrix_sorted, filtered_bvals_sorted, filtered_bvecs_sorted] = ADC_Filter(temporary_matrix_sorted,
                                                                                             temporary_bvals_sorted,
                                                                                             temporary_bvecs_sorted,
+                                                                                            reference = settings.get('ADC_reference', 'paired'),
+                                                                                            max_diffusivity = settings.get('ADC_max_diffusivity', 3.0),
                                                                                             operation_type = operation_type)
         output_path = os.path.join(out_path, folder)
         Save_Diffusion_Image_Data(output_path, 'ADC_Filtered', Header, filtered_matrix_sorted, filtered_bvals_sorted, filtered_bvecs_sorted)
@@ -335,6 +429,9 @@ def _process_topup(input_data, out_path, settings, gui_version="v2"):
     sub_registration = settings['sub_registration']
     Header = dict(input_data[3])
     temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted = stacked2sorted(*input_data[:3])
+    temporary_matrix_sorted = _replace_missing_shots(
+        temporary_matrix_sorted, temporary_bvals_sorted, temporary_bvecs_sorted,
+        out_path, policy=settings.get('missing_shots_policy', 'random_valid'))
     counter = 12
     if Registration_Mode == 'ON':
         counter        = counter + 1
@@ -364,6 +461,8 @@ def _process_topup(input_data, out_path, settings, gui_version="v2"):
         [filtered_matrix_sorted, filtered_bvals_sorted, filtered_bvecs_sorted] = ADC_Filter(temporary_matrix_sorted,
                                                                                             temporary_bvals_sorted,
                                                                                             temporary_bvecs_sorted,
+                                                                                            reference = settings.get('ADC_reference', 'paired'),
+                                                                                            max_diffusivity = settings.get('ADC_max_diffusivity', 3.0),
                                                                                             operation_type = operation_type)
         output_path = os.path.join(out_path,  folder)
         Save_Diffusion_Image_Data(output_path, 'ADC_Filtered', Header, filtered_matrix_sorted, filtered_bvals_sorted, filtered_bvecs_sorted)
@@ -488,6 +587,10 @@ def _settings_from_config(config):
     def flag(section):
         return 'ON' if config[section]['enabled'] else 'OFF'
 
+    if config['adc_filter'].get('reference', 'paired') not in ('paired', 'pooled'):
+        raise ValueError("adc_filter.reference must be 'paired' or 'pooled'.")
+    if config.get('missing_shots', {}).get('policy', 'random_valid') not in ('random_valid', 'error'):
+        raise ValueError("missing_shots.policy must be 'random_valid' or 'error'.")
     algorithm = config['registration']['algorithm']
     if algorithm not in ('Affine', 'Rigid', 'Translation'):
         raise ValueError('The original workflow supports Affine, Rigid, or Translation.')
@@ -514,6 +617,9 @@ def _settings_from_config(config):
         'registration_algorithm': algorithm,
         'temporary_denoising': config['registration']['temporary_denoising'],
         'ADC_Filter_Mode': flag('adc_filter'),
+        'ADC_reference': config['adc_filter'].get('reference', 'paired'),
+        'ADC_max_diffusivity': config['adc_filter'].get('max_diffusivity', 3.0),
+        'missing_shots_policy': config.get('missing_shots', {}).get('policy', 'random_valid'),
         'Averaging_Mode': flag('averaging'),
         'Denoising_Mode': flag('denoising'),
         'number_of_coils': config['denoising']['number_of_coils'],

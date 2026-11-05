@@ -71,3 +71,23 @@ If every repetition for an encoding is rejected, replacement stops with a clear
 error because no accepted donor exists. The original singleton branch is also
 preserved. Other numerical algorithms still come from the current CardPy checkout;
 new automatic rejection decisions need not match the legacy version exactly.
+
+
+Smart Health compatibility defaults:
+- `adc_filter.reference='paired'` restores the original ADC calculation: each
+  repetition is compared with the same repetition of the first lowest-b
+  encoding, using the full b-value span and threshold 3.0 µm²/ms. When all
+  repetitions fail, every tied minimum is retained. Use `'pooled'` explicitly
+  to select the newer CardPy pooled-baseline filter.
+- `missing_shots.policy='random_valid'` replaces input shots containing any
+  NaN/infinite pixel with a random wholly finite repetition from the same
+  slice and encoding, before Gibbs removal or registration. Blip and corrected
+  TOPUP inputs use this policy. No valid donor produces a clear error.
+  Set `'error'` to refuse missing input shots instead.
+- Each output directory receives `Missing_Shot_Replacements.json`, with
+  zero-based slice/encoding/repetition indices, donor indices, and encodings.
+  NumPy's global RNG supplies draws; seed it before `process()` for reproducible
+  replacements. Duplicated shots are not independent measurements.
+- Blip `00_Original` retains the imported input, including missing shots.
+  Subsequent stages use replacements. ADC-generated pixel NaNs are never
+  passed through input-shot replacement and remain excluded during averaging.
