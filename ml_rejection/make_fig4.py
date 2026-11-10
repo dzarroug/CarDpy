@@ -1,21 +1,18 @@
 """
-make_fig4.py -- Figure 4 from the comparison runs.
-
-(a) Box plots per rejection configuration: median myocardial MD
-    and FA per slice, and helix angle pitch (one point per slice).
-(b) Uncertainty: one line per participant connecting its median dMD, dFA, dE1 across
-    configurations (needs bootstrapped runs; panel is skipped until they exist).
+make_fig4.py -- Figure 3b: rejection configurations, both datasets in ONE row of panels.
 
   python ml_rejection/make_fig4.py
-  python ml_rejection/make_fig4.py --root rejection_comparison_purl
-  python ml_rejection/make_fig4.py --dataset1 /path/to/dataset1 --dataset2 /path/to/dataset2
+  python ml_rejection/make_fig4.py --dataset1 rejection_comparison_purl --dataset2 rejection_comparison_cima
 
-From Python: plot_comparison(dataset1_path, dataset2_path, output_dir=None)
+Panels: MD | FA | HAP | dMD | dFA | dE1. One dot per participant-slice (Dataset-1 blue,
+Dataset-2 orange); thin lines connect the same slice across configurations; boxes pool all
+slices of both datasets. MD/FA/dMD/dFA/dE1 = median over the myocardium of that slice;
+HAP = that slice's value from HAP.mat. Configurations: No rejection, Manual, Algorithm,
+CNN-Reject (any missing configuration is simply left out of the line).
 
-Reads rejection_comparison_purl/<study>/<config>.npz
-      .../<study>/<config>/CarDpy_Output/12_Quantitative_Results/HAP.mat
-      .../<study>/<config>/CarDpy_Output/14_Uncertainty/uncertainty.npz   (or <config>_uncertainty.npz)
-Writes ml_rejection/figures/fig4a.png, fig4b.png, fig4_values.csv
+Writes ml_rejection/figures/fig3b.png + .svg (one row), fig3b_metrics.png/.svg and
+fig3b_uncertainty.png/.svg (each three panels), fig3b_slice_values.csv, fig3b_summary.csv.
+Prints a summary table per dataset and any missing runs.
 """
 import argparse
 import os
@@ -23,239 +20,123 @@ import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
+from scipy.io import loadmat
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "figures")
 ORDER = ["none", "manual", "algorithm", "ml"]
-LABELS = {"none": "No\nrejection", "manual": "Manual", "algorithm": "Algorithm", "ml": "ML"}
-COLORS = {"none": "#7f7f7f", "manual": "#9467bd", "algorithm": "#1f77b4", "ml": "#ff7f0e"}
+LABELS = {"none": "No\nrejection", "manual": "Manual", "algorithm": "Algorithm", "ml": "CNN-\nReject"}
+DATASET_COLORS = {"Dataset-1": "#1f77b4", "Dataset-2": "#ff7f0e"}
+METRICS = [("MD", "Mean diffusivity", "µm²/ms", [1.0, 1.5, 2.0]),
+           ("FA", "Fractional anisotropy", "unitless", [0.2, 0.3, 0.4]),
+           ("HAP", "Helix angle pitch", "°/% wall depth", [-1.0, -0.5, 0.0])]
+UNCS = [("dMD", "dMD", "µm²/ms", None), ("dFA", "dFA", "unitless", None), ("dE1", "dE1", "degrees", None)]
+
+plt.rcParams.update({"svg.fonttype": "none", "font.size": 14, "axes.titlesize": 19,
+                     "axes.labelsize": 16, "xtick.labelsize": 12, "ytick.labelsize": 14})
 
 
-def load_hap(study, c):
-    f = os.path.join(study, c, "CarDpy_Output", "12_Quantitative_Results", "HAP.mat")
-    if not os.path.exists(f):
-        return None
-    from scipy.io import loadmat
-    return np.asarray(loadmat(f).get("HAP", np.nan), dtype=float).ravel()   # one value per slice
+def as3d(a):
+    a = np.asarray(a)
+    return a[..., None] if a.ndim == 2 else a
 
 
-def load_unc(study, c):
-    for f in (os.path.join(study, c, "CarDpy_Output", "14_Uncertainty", "uncertainty.npz"),
-              os.path.join(study, f"{c}_uncertainty.npz")):
-        if os.path.exists(f):
-            return np.load(f)
-    return None
-
-
-def collect(root, slice_medians=False):
-    vox, hap, unc = [], [], []
-    for name in sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))):
-        study = os.path.join(root, name)
-        for c in ORDER:
-            f = os.path.join(study, f"{c}.npz")
+def collect(root, dataset):
+    rows, problems = [], []
+    for study in sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))):
+        sdir = os.path.join(root, study)
+        for cfg in ORDER:
+            f = os.path.join(sdir, f"{cfg}.npz")
             if not os.path.exists(f):
                 continue
-            d = np.load(f)
-            mask = d["mask"] > 0
-            for label, key in (("MD", "dti_metrics__MD"), ("FA", "dti_metrics__FA")):
-                if key in d.files and d[key].shape[:mask.ndim] == mask.shape:
-                    if slice_medians:
-                        for slc in range(mask.shape[2]):
-                            v = d[key][:, :, slc][mask[:, :, slc]]
-                            v = v[np.isfinite(v)]
-                            if v.size:
-                                vox.append(pd.DataFrame({"study": [name], "config": [c],
-                                    "metric": [label], "slice": [slc], "value": [np.median(v)]}))
+            with np.load(f) as z:
+                mask = as3d(z["mask"]) > 0
+                for m, key in (("MD", "dti_metrics__MD"), ("FA", "dti_metrics__FA")):
+                    if key not in z:
+                        problems.append(f"{dataset} {study} {cfg}: missing {key}"); continue
+                    arr = as3d(z[key])
+                    if arr.shape != mask.shape:
+                        problems.append(f"{dataset} {study} {cfg}: {key} shape {arr.shape} != mask {mask.shape}")
                         continue
-                    v = d[key][mask]
-                    v = v[np.isfinite(v)]
-                    vox.append(pd.DataFrame({"study": name, "config": c, "metric": label, "value": v}))
-            h = load_hap(study, c)
-            if h is not None:
-                hdf = pd.DataFrame({"study": name, "config": c, "slice": np.arange(len(h)), "value": h})
-                hap.append(hdf[np.isfinite(hdf.value)])
-            u = load_unc(study, c)
-            if u is not None:
-                row = {"study": name, "config": c}
-                for k in ("dMD", "dFA", "dE1"):
-                    if k in u.files and u[k].shape[:mask.ndim] == mask.shape:
-                        x = u[k][mask]
-                        row[k] = float(np.nanmedian(x)) if np.isfinite(x).any() else np.nan
-                unc.append(row)
-    cat = lambda L: pd.concat(L, ignore_index=True) if L else pd.DataFrame()
-    return cat(vox), cat(hap), pd.DataFrame(unc)
+                    for s in range(mask.shape[2]):
+                        v = arr[..., s][mask[..., s]]; v = v[np.isfinite(v)]
+                        if v.size:
+                            rows.append((dataset, study, cfg, m, s, float(np.median(v))))
+            hp = os.path.join(sdir, cfg, "CarDpy_Output", "12_Quantitative_Results", "HAP.mat")
+            if os.path.exists(hp):
+                h = np.asarray(loadmat(hp).get("HAP", []), dtype=float).ravel()
+                rows += [(dataset, study, cfg, "HAP", s, float(x)) for s, x in enumerate(h) if np.isfinite(x)]
+            up = os.path.join(sdir, cfg, "CarDpy_Output", "14_Uncertainty", "uncertainty.npz")
+            if not os.path.exists(up):
+                up = os.path.join(sdir, f"{cfg}_uncertainty.npz")
+            if os.path.exists(up):
+                with np.load(up) as u:
+                    for m, *_ in UNCS:
+                        if m not in u:
+                            problems.append(f"{dataset} {study} {cfg}: uncertainty has no {m}"); continue
+                        a = as3d(u[m])
+                        if a.shape != mask.shape:
+                            problems.append(f"{dataset} {study} {cfg}: {m} shape {a.shape} != mask {mask.shape}")
+                            continue
+                        for s in range(mask.shape[2]):
+                            v = a[..., s][mask[..., s]]; v = v[np.isfinite(v)]
+                            if v.size:
+                                rows.append((dataset, study, cfg, m, s, float(np.median(v))))
+    return rows, problems
 
 
-def collect_datasets(roots, slice_medians=False):
-    """Combine named datasets while keeping participant/slice pairing unique."""
-    tables = [[], [], []]
-    for dataset, root in roots.items():
-        for parts, frame in zip(tables, collect(root, slice_medians=slice_medians)):
-            if frame.empty:
-                continue
-            frame = frame.copy()
-            frame['dataset'] = dataset
-            frame['study'] = dataset + '/' + frame['study']
-            parts.append(frame)
-    return tuple(pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-                 for parts in tables)
-
-
-def study_colors(names):
-    cmap = plt.get_cmap("tab10")
-    return {n: cmap(i % 10) for i, n in enumerate(sorted(names))}
-
-
-def boxpanel(ax, df, cfgs, title, ylabel, rng, colors, max_pts=3000):
-    studies = sorted(colors)
-    if "slice" in df.columns:
-        for (study, slc), g in df.groupby(["study", "slice"]):
-            values = g.set_index("config").reindex(cfgs)["value"]
-            ax.plot(range(len(cfgs)), values, color=colors[study], lw=1,
-                    alpha=0.25, zorder=1)
+def panel(ax, d, cfgs, title, unit, ticks):
+    for (ds, study, s), g in d.groupby(["dataset", "study", "slice"]):
+        y = g.set_index("config").reindex(cfgs)["value"].to_numpy(float)
+        ok = np.isfinite(y)
+        if ok.any():
+            ax.plot(np.arange(len(cfgs))[ok], y[ok], color=DATASET_COLORS[ds], lw=1, alpha=0.3, zorder=1)
     for i, c in enumerate(cfgs):
-        values = df.loc[df.config == c, "value"].to_numpy()
-        if not len(values):
+        vals = d.loc[d.config.eq(c), "value"].to_numpy()
+        if not len(vals):
             continue
-        bp = ax.boxplot([values], positions=[i], widths=0.5, showfliers=False,
-                        patch_artist=True, medianprops=dict(color="black", lw=2.5),
-                        whiskerprops=dict(color="black", lw=1.8),
-                        capprops=dict(color="black", lw=1.8),
-                        manage_ticks=False, zorder=4)
+        bp = ax.boxplot([vals], positions=[i], widths=0.5, showfliers=False, patch_artist=True,
+                        manage_ticks=False, zorder=4,
+                        medianprops=dict(color="black", lw=2.5),
+                        whiskerprops=dict(color="black", lw=1.8), capprops=dict(color="black", lw=1.8))
         bp["boxes"][0].set(facecolor=(0.85, 0.85, 0.85, 0.35), edgecolor="black", linewidth=2)
-        for study in studies:
-            sub = df[(df.config == c) & (df.study == study)]
-            if sub.empty:
-                continue
-            if len(sub) > max_pts:
-                sub = sub.iloc[rng.choice(len(sub), max_pts, replace=False)]
-            dense = len(sub) > 100
-            ax.scatter(np.full(len(sub), i),
-                       sub["value"], s=45 if dense else 85,
-                       alpha=0.35 if dense else 0.9, color=colors[study],
-                       zorder=0 if dense else 3, lw=0)
-    ax.set_xticks(range(len(cfgs)), [LABELS[c] for c in cfgs], fontsize=9)
-    ax.set_title(title, fontsize=11); ax.set_ylabel(ylabel)
-    ax.grid(axis="y", alpha=0.3)
+        for ds, col in DATASET_COLORS.items():
+            sub = d[d.config.eq(c) & d.dataset.eq(ds)]
+            ax.scatter(np.full(len(sub), i), sub["value"], s=70, color=col, alpha=0.85, lw=0, zorder=3)
+    ax.set_xticks(range(len(cfgs)), [LABELS[c] for c in cfgs])
+    ax.set_xlim(-0.5, len(cfgs) - 0.5)
+    ax.set_title(title); ax.set_ylabel(unit)
+    if ticks:
+        ax.set_yticks(ticks); ax.set_ylim(ticks[0], ticks[-1])
+    else:
+        ax.set_ylim(bottom=0)
+    ax.grid(axis="y", alpha=0.3); ax.spines[["top", "right"]].set_visible(False)
 
 
-def paired_panel(ax, df, cfgs, title, ylabel, colors):
-    """One line per participant/slice connecting its value across configurations."""
-    for (study, slc), g in df.groupby(["study", "slice"]):
-        g = g.set_index("config").reindex(cfgs)
-        ax.plot(range(len(cfgs)), g["value"], color=colors[study], lw=1,
-                alpha=0.25, zorder=1)
-        ax.scatter(range(len(cfgs)), g["value"], color=colors[study], s=64,
-                   alpha=0.85, edgecolors="black", linewidths=0.4, zorder=3)
-    ax.set_xticks(range(len(cfgs)), [LABELS[c] for c in cfgs], fontsize=9)
-    ax.set_xlim(-0.4, len(cfgs) - 0.6)
-    ax.set_title(title, fontsize=11); ax.set_ylabel(ylabel)
-    ax.grid(axis="y", alpha=0.3)
-
-
-def participant_legend(fig, colors):
-    from matplotlib.lines import Line2D
-    handles = [Line2D([], [], marker="o", ms=8, ls="", color=col, label=f"Participant {i + 1}")
-               for i, (n, col) in enumerate(sorted(colors.items()))]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=14, frameon=False,
-               bbox_to_anchor=(0.5, -0.06))
-
-
-def fig_a(vox, hap, cfgs, output_dir=None):
-    rng = np.random.default_rng(0)
-    colors = {name: "#1f77b4" for name in vox.study.unique()}
-    dataset_colors = {}
-    if "dataset" in vox.columns:
-        dataset_colors = dict(zip(vox.dataset.unique(), plt.get_cmap("tab10").colors))
-        colors = {row.study: dataset_colors[row.dataset]
-                  for row in vox[["study", "dataset"]].drop_duplicates().itertuples()}
-    panels = [("MD", "Mean diffusivity", "µm²/ms"),
-              ("FA", "Fractional anisotropy", "unitless")]
-    n = len(panels) + (0 if hap.empty else 1)
-    fig, axes = plt.subplots(1, n, figsize=(4.2 * n, 4.2))
-    for ax, (m, title, unit) in zip(axes, panels):
-        boxpanel(ax, vox[vox.metric == m], cfgs, title, unit, rng, colors)
-    if not hap.empty:
-        boxpanel(axes[-1], hap, cfgs, "Helix angle pitch", "°/% wall depth", rng, colors)
-    for ax, ticks in zip(axes, ([1, 1.5, 2], [0.2, 0.3, 0.4], [-1, -0.5, 0])):
-        ax.spines[["top", "right"]].set_visible(False)
-        ax.set_yticks(ticks)
-        ax.tick_params(axis="both", labelsize=15)
-        ax.xaxis.label.set_size(17)
-        ax.yaxis.label.set_size(17)
-        ax.title.set_size(20)
-    fig.suptitle("(a) cDTI metrics by shot-rejection configuration", x=0.01, ha="left", fontsize=22)
+def figure(df, cfgs, panels, stem, heading):
+    fig, axes = plt.subplots(1, len(panels), figsize=(5.0 * len(panels), 5.2))
+    axes = np.atleast_1d(axes)
+    for ax, (m, title, unit, ticks) in zip(axes, panels):
+        panel(ax, df[df.metric.eq(m)], cfgs, title, unit, ticks)
+    if heading:
+        fig.suptitle(heading, x=0.01, ha="left", fontsize=22)
     fig.tight_layout()
-    if len(dataset_colors) > 1:
-        from matplotlib.lines import Line2D
-        fig.legend(handles=[Line2D([], [], marker="o", ms=8, ls="", color=color,
-                                   label=f"Dataset {i + 1}")
-                            for i, (name, color) in enumerate(dataset_colors.items())],
-                   loc="lower center", ncol=len(dataset_colors), fontsize=14,
-                   frameon=False, bbox_to_anchor=(0.5, -0.06))
-    out_dir = os.fspath(output_dir) if output_dir is not None else FIGS
-    os.makedirs(out_dir, exist_ok=True)
-    out = os.path.join(out_dir, "fig4a.png")
-    fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
-    return out
+    fig.legend(handles=[Line2D([], [], marker="o", ms=9, ls="", color=c, label=n)
+                        for n, c in DATASET_COLORS.items()],
+               loc="lower center", ncol=2, fontsize=15, frameon=False, bbox_to_anchor=(0.5, -0.08))
+    for ext in ("png", "svg"):
+        fig.savefig(os.path.join(FIGS, f"{stem}.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("wrote", f"{stem}.png and .svg")
 
 
-def plot_comparison(dataset1_path, dataset2_path, output_dir=None):
-    """Save Figure 4a for two dataset folders and return its PNG path.
-
-    Dataset 1 is blue; Dataset 2 is orange. Inputs contain one participant
-    directory per study with none.npz, algorithm.npz, and ml.npz results.
-    MD/FA dots are slice medians; HAP is read from each run's HAP.mat.
-    """
-    roots = {"Dataset 1": os.path.abspath(os.path.expanduser(os.fspath(dataset1_path))),
-             "Dataset 2": os.path.abspath(os.path.expanduser(os.fspath(dataset2_path)))}
-    for name, root in roots.items():
-        if not os.path.isdir(root):
-            raise FileNotFoundError(f"{name} folder not found: {root}")
-    vox, hap, _ = collect_datasets(roots, slice_medians=True)
-    present = set(vox.dataset) if not vox.empty else set()
-    for name, root in roots.items():
-        if name not in present:
-            raise ValueError(f"No usable MD/FA results for {name}: {root}")
-    cfgs = [c for c in ORDER if c in set(vox.config)]
-    out_dir = os.path.expanduser(os.fspath(output_dir)) if output_dir is not None else FIGS
-    path = fig_a(vox, hap, cfgs, output_dir=out_dir)
-    vox.to_csv(os.path.join(out_dir, "fig4a_slice_medians.csv"), index=False)
-    hap.to_csv(os.path.join(out_dir, "fig4a_hap.csv"), index=False)
-    return path
-
-
-def fig_b(unc, cfgs):
-    colors = study_colors(unc.study.unique())
-    panels = [("dMD", "dMD", "µm²/ms"), ("dFA", "dFA", "unitless"), ("dE1", "dE1", "degrees")]
-    fig, axes = plt.subplots(1, 3, figsize=(12, 3.8))
-    for ax, (k, title, unit) in zip(axes, panels):
-        if k not in unc:
-            ax.set_visible(False); continue
-        for name, g in unc.groupby("study"):
-            g = g.set_index("config").reindex(cfgs)
-            ax.plot(range(len(cfgs)), g[k], "-o", color=colors[name], lw=1.5, ms=6,
-                    mec="black", mew=0.5)
-        ax.set_xticks(range(len(cfgs)), [LABELS[c] for c in cfgs], fontsize=9)
-        ax.set_title(f"{title} [{unit}]", fontsize=11)
-        ax.set_ylim(bottom=0); ax.grid(axis="y", alpha=0.3)
-    axes[0].set_ylabel("Median myocardial uncertainty")
-    fig.suptitle("(b) Bootstrapped uncertainty (one line per participant)", x=0.01, ha="left", fontsize=12)
-    fig.tight_layout()
-    participant_legend(fig, colors)
-    out = os.path.join(FIGS, "fig4b.png")
-    fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
-    return out
-
-
-if __name__ == "__main__":
+def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--root", default="rejection_comparison_purl")
-    ap.add_argument("--dataset1", help="Dataset 1 results folder (blue)")
-    ap.add_argument("--dataset2", help="Dataset 2 results folder (orange)")
-    ap.add_argument("--output-dir", help="Output folder for the two-dataset figure")
+    ap.add_argument("--dataset1", default="rejection_comparison_purl")
+    ap.add_argument("--dataset2", default="rejection_comparison_cima")
     args = ap.parse_args()
     if args.dataset1 or args.dataset2:
         if not (args.dataset1 and args.dataset2):
@@ -263,24 +144,46 @@ if __name__ == "__main__":
         print("wrote", plot_comparison(args.dataset1, args.dataset2, args.output_dir))
         raise SystemExit(0)
     os.makedirs(FIGS, exist_ok=True)
-    vox, hap, unc = collect(args.root, slice_medians=True)
-    if vox.empty:
-        raise SystemExit(f"No <config>.npz results found under {args.root}")
-    cfgs = [c for c in ORDER if c in set(vox.config)]
-    print("configs:", cfgs, "| participants:", vox.study.nunique())
 
-    rows = [vox.groupby(["config", "metric"])["value"].median().unstack().add_suffix("_median")]
-    if not hap.empty:
-        rows.append(hap.groupby("config")["value"].median().rename("HAP_median"))
-    if not unc.empty:
-        rows.append(unc.groupby("config")[[k for k in ("dMD", "dFA", "dE1") if k in unc]].median()
-                    .add_suffix("_median"))
-    table = pd.concat(rows, axis=1).reindex(cfgs).round(4)
-    table.to_csv(os.path.join(FIGS, "fig4_values.csv"))
-    print(table.to_string())
+    rows, problems = [], []
+    for name, root in (("Dataset-1", args.dataset1), ("Dataset-2", args.dataset2)):
+        if not os.path.isdir(root):
+            raise SystemExit(f"{name} folder not found: {root}")
+        r, p = collect(root, name); rows += r; problems += p
+    df = pd.DataFrame(rows, columns=["dataset", "study", "config", "metric", "slice", "value"])
+    if df.empty:
+        raise SystemExit("No results found")
+    cfgs = [c for c in ORDER if c in set(df.config)]
 
-    print("wrote", fig_a(vox, hap, cfgs))
-    if unc.empty:
-        print("(b) skipped: no bootstrapped uncertainty found yet")
-    else:
-        print("wrote", fig_b(unc, cfgs))
+    # ---- printout ----
+    for ds, g in df.groupby("dataset"):
+        names = sorted(g.study.unique())
+        n_slices = g[g.metric.eq("MD")].groupby("study").slice.nunique().sum()
+        print(f"\n{ds}: {len(names)} participants, {n_slices} slices | "
+              f"configurations {[c for c in cfgs if c in set(g.config)]}")
+        print("  participant numbers:", {n: f"P{i + 1}" for i, n in enumerate(names)})
+        table = g.pivot_table(index="config", columns="metric", values="value", aggfunc="median").reindex(cfgs)
+        print("  median of slice values:")
+        print(table.round(4).to_string())
+        have = g[g.metric.isin(["dMD", "dFA", "dE1"])].groupby("study").config.apply(set).to_dict()
+        present = [c for c in cfgs if c in set(g.config)]
+        missing = [(n, [c for c in present if c not in have.get(n, set())]) for n in names]
+        missing = [(n, m) for n, m in missing if m]
+        total = len(names) * len(present)
+        print(f"  uncertainty runs found: {total - sum(len(m) for _, m in missing)} of {total}")
+        for n, m in missing:
+            print(f"    {n}: no uncertainty for {m}")
+    for p in problems:
+        print("  WARNING:", p)
+
+    df.to_csv(os.path.join(FIGS, "fig3b_slice_values.csv"), index=False)
+    (df.pivot_table(index=["dataset", "config"], columns="metric", values="value", aggfunc="median")
+       .round(4).to_csv(os.path.join(FIGS, "fig3b_summary.csv")))
+
+    figure(df, cfgs, METRICS + UNCS, "fig3b", "")
+    figure(df, cfgs, METRICS, "fig3b_metrics", "")
+    figure(df, cfgs, UNCS, "fig3b_uncertainty", "")
+
+
+if __name__ == "__main__":
+    main()
