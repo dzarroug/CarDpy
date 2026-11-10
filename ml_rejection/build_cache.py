@@ -56,6 +56,7 @@ def main():
     ap.add_argument("--val", type=int, default=5, help="participants in validation")
     ap.add_argument("--test", type=int, default=5, help="participants in test")
     ap.add_argument("--seed", type=int, default=51)
+    ap.add_argument("--test-ids", default="", help="comma-separated participants forced into test")
     args = ap.parse_args()
 
     df = pd.read_csv(args.labels)
@@ -67,10 +68,17 @@ def main():
 
     # participant-level split
     people = sorted(df["participant"].unique())
+    forced = [p for p in args.test_ids.split(",") if p]
     rng = np.random.default_rng(args.seed)
-    rng.shuffle(people)
-    test = set(people[:args.test])
-    val = set(people[args.test:args.test + args.val])
+    rest = [p for p in people if p not in forced]
+    rng.shuffle(rest)
+    if forced:
+        test = set(forced)
+        val = set(rest[:args.val])
+    else:
+        rng.shuffle(people)
+        test = set(people[:args.test])
+        val = set(people[args.test:args.test + args.val])
     df["split"] = ["test" if p in test else "val" if p in val else "train"
                    for p in df["participant"]]
 

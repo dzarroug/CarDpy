@@ -13,7 +13,12 @@ Second reader: re-run with saved crops/rejection and draw your own contours (ope
 contour GUI only), saved as <name>.npz next to the others:
   python ml_rejection/make_fig5.py --manual-run ariel_seg --root rejection_comparison_cima --raw /path/to/cima
 
-Any pair can be compared (default: --ref algorithm = first reader, --test auto_seg):
+Final figure, one row per pair in this order -- (A) Reader 1 vs nnUNet-Segment,
+(B) Reader 2 vs nnUNet-Segment, (C) Reader 1 vs Reader 2:
+  python ml_rejection/make_fig5.py --root rejection_comparison_cima --three-readers
+  (Reader 1 = ariel_seg, Reader 2 = algorithm, auto = auto_seg; change with --reader1/--reader2/--auto)
+
+Any single pair can be compared (default: --ref algorithm, --test auto_seg):
   python ml_rejection/make_fig5.py --root rejection_comparison_cima --ref ariel_seg --test auto_seg \
       --ref-label "Reader 2" --test-label "Automated"
 
@@ -94,13 +99,15 @@ def dice(a, b):
     return 2 * (a & b).sum() / s if s else np.nan
 
 
-def outline(ax, m, color, label):
-    if m.any():
-        ax.contour(m.astype(float), levels=[0.5], colors=color, linewidths=1.6)
-    ax.plot([], [], color=color, lw=2, label=label)
+REF_C, TEST_C, BOTH_C = np.array([0.89, 0.10, 0.11]), np.array([0.12, 0.30, 0.95]), np.array([0.50, 0.12, 0.60])
+UNITS = {"MD": "µm²/ms", "FA": "", "HAP": "°/%"}
+plt.rcParams.update({"font.size": 13, "axes.titlesize": 14, "axes.labelsize": 13,
+                     "xtick.labelsize": 11, "ytick.labelsize": 11, "legend.fontsize": 11})
+plt.rcParams["svg.fonttype"] = "none"  # Keep SVG text editable in Illustrator
 
 
-def compare(root, ref="algorithm", test="auto_seg", ref_label="Manual", test_label="Automated"):
+def pair_table(root, ref, test):
+    """Per-slice Dice + metric medians for one pair; also the example candidates."""
     rows, examples = [], []
     for name in studies(root):
         fa, fb = os.path.join(root, name, f"{ref}.npz"), os.path.join(root, name, f"{test}.npz")
@@ -124,64 +131,115 @@ def compare(root, ref="algorithm", test="auto_seg", ref_label="Manual", test_lab
             if ha is not None and hb is not None and s < len(ha) and s < len(hb):
                 row["HAP_manual"], row["HAP_auto"] = float(ha[s]), float(hb[s])
             rows.append(row)
-            examples.append((row["dice"], name, s, A["background"], a, b))
+            bg = A["background"]
+            examples.append((row["dice"], name, s, bg[..., s] if bg.ndim == 3 else bg, a, b))
     df = pd.DataFrame(rows)
     if df.empty:
         raise SystemExit(f"No studies with both {ref}.npz and {test}.npz under {root}.")
-    os.makedirs(FIGS, exist_ok=True)
-    tag = f"{os.path.basename(os.path.normpath(root))}_{ref}_vs_{test}"
-    df.to_csv(os.path.join(FIGS, f"fig5_{tag}.csv"), index=False)
+    return df, examples
 
-    metrics = [m for m in ("MD", "FA", "HAP") if f"{m}_manual" in df]
-    units = {"MD": "µm²/ms", "FA": "", "HAP": "°/%"}
-    fig = plt.figure(figsize=(4 + 3.3 * (len(metrics) + 1), 4))
-    gs = fig.add_gridspec(1, len(metrics) + 2, width_ratios=[1.3, 0.8] + [1] * len(metrics), wspace=0.4)
 
-    # (a) example: the slice closest to the median Dice
-    med = df.dice.median()
-    _, name, s, bg, a, b = min(examples, key=lambda e: abs(e[0] - med))
+def overlay(ax, img, a, b, ref_label, test_label):
+    """Masks: reference only = red, test only = blue, overlap = purple; bold contours on top."""
     ys, xs = np.where(a | b); pad = 8
     y0, y1 = max(ys.min() - pad, 0), ys.max() + pad + 1
     x0, x1 = max(xs.min() - pad, 0), xs.max() + pad + 1
-    ax = fig.add_subplot(gs[0])
-    img = bg[..., s] if bg.ndim == 3 else bg
-    ax.imshow(img[y0:y1, x0:x1], cmap="gray", vmin=0, vmax=np.nanpercentile(img, 99.5))
-    outline(ax, a[y0:y1, x0:x1], "#2ca02c", ref_label)
-    outline(ax, b[y0:y1, x0:x1], "#ff7f0e", test_label)
-    ax.set_xticks([]); ax.set_yticks([]); ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=2, fontsize=8, frameon=False)
-    ax.set_title(f"(a) Example (Dice {dice(a, b):.2f})", fontsize=10)
+    img, a, b = img[y0:y1, x0:x1], a[y0:y1, x0:x1], b[y0:y1, x0:x1]
+    ax.imshow(img, cmap="gray", vmin=0, vmax=np.nanpercentile(img, 99.5))
+    rgba = np.zeros(img.shape + (4,))
+    rgba[a & ~b, :3], rgba[b & ~a, :3], rgba[a & b, :3] = REF_C, TEST_C, BOTH_C
+    rgba[a | b, 3] = 0.65
+    ax.imshow(rgba)
+    for m, c in ((a, REF_C), (b, TEST_C)):
+        if m.any():
+            ax.contour(m.astype(float), levels=[0.5], colors=[c], linewidths=2.2)
+    ax.set_xticks([]); ax.set_yticks([])
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(color=REF_C, label=ref_label), Patch(color=TEST_C, label=test_label),
+                       Patch(color=BOTH_C, label="Overlap")],
+              loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=3, fontsize=9,
+              frameon=False, handlelength=1.2, columnspacing=0.8)
 
-    # (b) Dice per slice
-    ax = fig.add_subplot(gs[1])
+
+def draw_row(axes, df, examples, ref_label, test_label, letter):
+    metrics = [m for m in ("MD", "FA", "HAP") if f"{m}_manual" in df]
+    med = df.dice.median()
+    d, name, s, img, a, b = min(examples, key=lambda e: abs(e[0] - med))   # typical slice
+    overlay(axes[0], img, a, b, ref_label, test_label)
+    axes[0].set_title(f"({letter}) {ref_label} vs. {test_label}\nexample, Dice {d:.2f}", fontsize=13)
+
+    ax = axes[1]                                                      # Dice per slice
     rng = np.random.default_rng(0)
     ax.boxplot(df.dice, widths=0.5, showfliers=False, medianprops=dict(color="black", lw=2))
-    ax.scatter(1 + rng.uniform(-0.12, 0.12, len(df)), df.dice, s=18, color="#ff7f0e", zorder=3)
+    ax.scatter(1 + rng.uniform(-0.12, 0.12, len(df)), df.dice, s=30, color=BOTH_C, zorder=3)
     ax.set_ylim(min(0.6, df.dice.min() - 0.05), 1); ax.set_xticks([])
-    ax.set_title(f"(b) Dice\nmedian {med:.2f}", fontsize=10); ax.grid(axis="y", alpha=0.3)
+    ax.set_title(f"Dice\nmedian {med:.2f}"); ax.grid(axis="y", alpha=0.4)
 
-    # (c) manual vs automated metrics, one point per slice
-    for i, m in enumerate(metrics):
-        ax = fig.add_subplot(gs[2 + i])
+    for i, m in enumerate(metrics):                                   # agreement, one point per slice
+        ax = axes[2 + i]
         x, y = df[f"{m}_manual"], df[f"{m}_auto"]
-        ax.scatter(x, y, s=22, color="#1f77b4", edgecolor="black", lw=0.4)
         lo, hi = np.nanmin([x.min(), y.min()]), np.nanmax([x.max(), y.max()])
-        pad = 0.05 * (hi - lo or 1)
-        ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad], "--", color="gray", lw=1)
-        ax.set_xlim(lo - pad, hi + pad); ax.set_ylim(lo - pad, hi + pad)
-        ax.set_xlabel(f"{ref_label} {units[m]}".strip()); ax.set_ylabel(f"{test_label} {units[m]}".strip())
-        diff = (y - x)
-        ax.set_title(f"{'(c) ' if i == 0 else ''}{m}\nbias {np.nanmean(diff):+.3f}", fontsize=10)
-        ax.set_aspect("equal", adjustable="box")
-    out = os.path.join(FIGS, f"fig5_{tag}.png")
-    fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
+        pad = 0.08 * (hi - lo or abs(hi) or 1)
+        lo, hi = lo - pad, hi + pad
+        from matplotlib.ticker import MaxNLocator
+        ticks = [t for t in MaxNLocator(nbins=4).tick_values(lo, hi) if lo <= t <= hi]
+        ax.plot([lo, hi], [lo, hi], "--", color="gray", lw=1.2, zorder=1)
+        ax.scatter(x, y, s=40, color="#1f77b4", edgecolor="black", lw=0.5, zorder=3)
+        ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+        ax.set_xticks(ticks); ax.set_yticks(ticks)                    # identical ticks on both axes
+        ax.grid(True, alpha=0.4); ax.set_aspect("equal", adjustable="box")
+        unit = f" ({UNITS[m]})" if UNITS[m] else ""
+        ax.set_xlabel(f"{ref_label}{unit}"); ax.set_ylabel(f"{test_label}{unit}")
+        pct = 100 * (y - x) / x.abs()
+        ax.set_title(f"{m}\nmedian difference {pct.median():+.1f}%")
 
-    print(f"{ref_label} vs {test_label}: {len(df)} slices from {df.study.nunique()} participants | Dice median {med:.3f} "
-          f"(IQR {df.dice.quantile(.25):.3f}-{df.dice.quantile(.75):.3f})")
-    for m in metrics:
-        d = df[f"{m}_auto"] - df[f"{m}_manual"]
-        print(f"{m}: bias {d.mean():+.4f}, 95% limits of agreement {d.mean() - 1.96 * d.std():+.4f} to "
-              f"{d.mean() + 1.96 * d.std():+.4f}")
-    print("wrote", out, f"and fig5_{tag}.csv")
+
+def report(df, ref_label, test_label, tag):
+    med = df.dice.median()
+    print(f"\n{ref_label} vs {test_label}: {len(df)} slices from {df.study.nunique()} participants | "
+          f"Dice median {med:.3f} (IQR {df.dice.quantile(.25):.3f}-{df.dice.quantile(.75):.3f})")
+    rows = []
+    for m in [m for m in ("MD", "FA", "HAP") if f"{m}_manual" in df]:
+        a, b = df[f"{m}_manual"], df[f"{m}_auto"]
+        pct = 100 * (b - a) / a.abs()
+        rows.append({"metric": m,
+                     f"{ref_label} median (IQR)": f"{a.median():.3f} ({a.quantile(.25):.3f} to {a.quantile(.75):.3f})",
+                     f"{test_label} median (IQR)": f"{b.median():.3f} ({b.quantile(.25):.3f} to {b.quantile(.75):.3f})",
+                     "median % difference (IQR)": f"{pct.median():+.1f}% ({pct.quantile(.25):+.1f} to {pct.quantile(.75):+.1f})",
+                     "slices within 5%": f"{int((pct.abs() <= 5).sum())}/{len(pct)}"})
+    summary = pd.DataFrame(rows)
+    summary.to_csv(os.path.join(FIGS, f"fig5_{tag}_summary.csv"), index=False)
+    df.to_csv(os.path.join(FIGS, f"fig5_{tag}.csv"), index=False)
+    print(f"% difference = ({test_label} - {ref_label}) / |{ref_label}|")
+    print(summary.to_string(index=False))
+
+
+def make_figure(root, pairs, stem):
+    """pairs: list of (ref, test, ref_label, test_label); one row per pair, in order."""
+    os.makedirs(FIGS, exist_ok=True)
+    tables = []
+    for ref, test, rl, tl in pairs:
+        df, ex = pair_table(root, ref, test)
+        report(df, rl, tl, f"{os.path.basename(os.path.normpath(root))}_{ref}_vs_{test}")
+        tables.append((df, ex, rl, tl))
+    ncols = 2 + max(len([m for m in ("MD", "FA", "HAP") if f"{m}_manual" in t[0]]) for t in tables)
+    fig = plt.figure(figsize=(4.2 * ncols, 4.6 * len(tables)))
+    gs = fig.add_gridspec(len(tables), ncols, width_ratios=[1.25, 0.6] + [1] * (ncols - 2),
+                          wspace=0.45, hspace=0.75)
+    for r, (df, ex, rl, tl) in enumerate(tables):
+        axes = [fig.add_subplot(gs[r, c]) for c in range(ncols)]
+        draw_row(axes, df, ex, rl, tl, "ABCDEFGH"[r])
+        for ax in axes[2 + len([m for m in ("MD", "FA", "HAP") if f"{m}_manual" in df]):]:
+            ax.set_visible(False)
+    for ext in ("png", "svg"):
+        fig.savefig(os.path.join(FIGS, f"{stem}.{ext}"), dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("\nwrote", os.path.join(FIGS, f"{stem}.png"), "and .svg")
+
+
+def compare(root, ref="algorithm", test="auto_seg", ref_label="Manual", test_label="Automated"):
+    tag = f"{os.path.basename(os.path.normpath(root))}_{ref}_vs_{test}"
+    make_figure(root, [(ref, test, ref_label, test_label)], f"fig5_{tag}")
 
 
 if __name__ == "__main__":
@@ -192,7 +250,17 @@ if __name__ == "__main__":
     ap.add_argument("--manual-run", metavar="NAME", help="draw a second reader's contours, saved as NAME")
     ap.add_argument("--ref", default="algorithm"); ap.add_argument("--test", default="auto_seg")
     ap.add_argument("--ref-label", default="Manual"); ap.add_argument("--test-label", default="Automated")
+    ap.add_argument("--three-readers", action="store_true",
+                    help="one figure: (A) Reader 1 vs nnUNet-Segment, (B) Reader 2 vs nnUNet-Segment, (C) Reader 1 vs Reader 2")
+    ap.add_argument("--reader1", default="ariel_seg"); ap.add_argument("--reader2", default="algorithm")
+    ap.add_argument("--auto", default="auto_seg"); ap.add_argument("--auto-label", default="nnUNet-Segment")
     args = ap.parse_args()
+    if args.three_readers:
+        make_figure(args.root, [(args.reader1, args.auto, "Reader 1", args.auto_label),
+                                (args.reader2, args.auto, "Reader 2", args.auto_label),
+                                (args.reader1, args.reader2, "Reader 1", "Reader 2")],
+                    f"fig5_{os.path.basename(os.path.normpath(args.root))}_three_readers")
+        raise SystemExit
     if args.manual_run:
         run_seg(args.root, args.raw, out_name=args.manual_run, auto=False)
         raise SystemExit(f"Saved {args.manual_run}.npz for each study. Compare with --ref/--test.")

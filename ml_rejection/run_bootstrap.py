@@ -12,7 +12,7 @@ ap.add_argument("--n_jobs", type=int, default=8)
 args = ap.parse_args()
 
 runs = sorted(glob.glob(os.path.join(args.root, "*", "*", "CarDpy_Output")))
-runs = [r for r in runs if "/auto_seg/" not in r]
+runs = [r for r in runs if "/auto_seg/" not in r and "/ariel_seg/" not in r]
 print(f"{len(runs)} run folders found")
 for i, run in enumerate(runs, 1):
     done = os.path.join(run, "14_Uncertainty", "uncertainty.npz")

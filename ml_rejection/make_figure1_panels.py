@@ -28,6 +28,7 @@ OUTPUT_DIR = '/Users/dahniazarroug/Desktop/Dahnia/V001/CarDpy_Output'
 SAVE_DIR   = os.path.join(OUTPUT_DIR, 'Figure1_Panels')
 SLICE      = 0       # slice index within the processed data (0 = first processed slice)
 MARGIN     = 0.35    # extra space around the LV, as a fraction of the LV box size
+SHIFT_LEFT = 0.10    # slide the crop left by this fraction of the panel width (negative = right)
 DPI        = 300
 STAGES     = ['Original', 'Unrung', 'Rejected', 'Registered',
               'Averaged', 'Denoised', 'Interpolated']
@@ -68,6 +69,7 @@ def crop_box(mask):
     r0, r1, c0, c1 = rows.min(), rows.max(), cols.min(), cols.max()
     size = max(r1 - r0, c1 - c0) * (1 + 2 * MARGIN)
     rc, cc = (r0 + r1) / 2, (c0 + c1) / 2
+    cc -= SHIFT_LEFT * size
     h, w = mask.shape
     return ((rc - size / 2) / h, (rc + size / 2) / h, (cc - size / 2) / w, (cc + size / 2) / w)
 

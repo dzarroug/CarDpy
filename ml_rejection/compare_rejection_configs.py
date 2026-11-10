@@ -57,8 +57,7 @@ CONFIGS = [
     "algorithm",
     "none",
     "ml",
-    # "manual",   # Rejection_Configuration.json at
-    #             # rejection_comparison/<study>/manual_Rejection_Configuration.json
+    "manual",
 ]
 # --------------------------------------------
 

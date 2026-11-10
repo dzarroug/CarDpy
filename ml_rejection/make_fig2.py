@@ -11,7 +11,7 @@ make_fig2.py -- Figure 2 (a) and (b) for the abstract, from files you already ha
 Reads  ml_rejection/models/crop80/test_predictions.csv  (written by train.py --test)
        ml_rejection/models/crop80/best.pt               (threshold, crop)
        ml_rejection/cache/X.npy + meta.csv
-Writes ml_rejection/figures/fig2a.png, fig2b.png, fig2b_candidates.png
+Writes PNG previews + editable SVG versions of fig2a, fig2b, fig2b_candidates
 """
 import argparse
 import os
@@ -24,8 +24,30 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, precision_recall_curve
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(HERE, "cache")
+CACHE = os.path.join(HERE, "cache_algorithm")
 FIGS = os.path.join(HERE, "figures")
+
+# Preserve SVG text as editable Illustrator text (rather than glyph outlines).
+# MRI pixels remain raster images within the SVG; plots/lines/labels remain vector.
+plt.rcParams.update({
+    "svg.fonttype": "none", "font.family": "DejaVu Sans", "font.size": 12,
+    "axes.titlesize": 15, "axes.labelsize": 13,
+    "xtick.labelsize": 11, "ytick.labelsize": 11,
+    "axes.linewidth": 1.3, "lines.linewidth": 2.5,
+    "grid.linewidth": 0.9, "grid.alpha": 0.25,
+    "legend.fontsize": 11,
+})
+
+
+def export_figure(fig, stem, dpi=300):
+    """Write PNG preview and Illustrator-editable SVG from the SAME figure."""
+    png = os.path.join(FIGS, f"{stem}.png")
+    svg = os.path.join(FIGS, f"{stem}.svg")
+    fig.savefig(png, dpi=dpi, bbox_inches="tight", facecolor="white")
+    fig.savefig(svg, format="svg", bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return png
+
 
 CATS = [("TP", "Both reject"), ("FP", "ML only rejects"),
         ("FN", "Algorithm only rejects"), ("TN", "Both keep")]
@@ -64,28 +86,27 @@ def fig_a(preds, thr):
     prec, rec, _ = precision_recall_curve(y, p)
     op_p, op_r = tp / max(tp + fp, 1), tp / max(tp + fn, 1)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4.2), gridspec_kw={"width_ratios": [1, 1.25]})
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12.5, 5.2), gridspec_kw={"width_ratios": [1, 1.25]})
     cm = np.array([[tp, fn], [fp, tn]])
     ax1.imshow(cm / cm.sum(axis=1, keepdims=True), cmap="Blues", vmin=0, vmax=1)
     for (i, j), v in np.ndenumerate(cm):
         frac = v / cm[i].sum()
-        ax1.text(j, i, f"{v}\n({100 * frac:.0f}%)", ha="center", va="center", fontsize=12,
+        ax1.text(j, i, f"{v}\n({100 * frac:.0f}%)", ha="center", va="center", fontsize=15, fontweight="semibold",
                  color="white" if frac > 0.6 else "black")
     ax1.set_xticks([0, 1], ["ML reject", "ML keep"]); ax1.set_yticks([0, 1], ["Algorithm\nreject", "Algorithm\nkeep"])
-    ax1.set_title("(a) Test set agreement", loc="left", fontsize=11)
+    ax1.set_title("(a) Test set agreement", loc="left", fontsize=16, fontweight="semibold")
 
-    ax2.plot(rec, prec, lw=2, label=f"CNN (AP = {ap:.2f})")
-    ax2.axhline(y.mean(), ls="--", c="gray", label=f"Chance (AP = {y.mean():.2f})")
-    ax2.plot(op_r, op_p, "o", ms=8, c="crimson", label=f"Operating point (threshold {thr:.2f})")
+    ax2.plot(rec, prec, lw=3, label=f"CNN (AP = {ap:.2f})")
+    ax2.axhline(y.mean(), ls="--", lw=1.8, c="gray", label=f"Chance (AP = {y.mean():.2f})")
+    ax2.plot(op_r, op_p, "o", ms=10, c="crimson", label=f"Operating point (threshold {thr:.2f})")
     ax2.set_xlabel("Recall"); ax2.set_ylabel("Precision"); ax2.set_xlim(0, 1); ax2.set_ylim(0, 1.02)
-    ax2.legend(loc="best", fontsize=9, frameon=False)
-    ax2.set_title("Precision-recall", loc="left", fontsize=11)
+    ax2.legend(loc="best", fontsize=11, frameon=False)
+    ax2.set_title("Precision–recall", loc="left", fontsize=16, fontweight="semibold")
     n_part = preds["participant"].nunique()
     fig.suptitle(f"{n_part} held-out participants, {len(y):,} images, {int(y.sum())} rejected by the algorithm",
-                 fontsize=10, y=0.02, va="bottom")
+                 fontsize=11, y=0.02, va="bottom")
     fig.tight_layout(rect=(0, 0.05, 1, 1))
-    out = os.path.join(FIGS, "fig2a.png")
-    fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
+    out = export_figure(fig, "fig2a")
     return out, dict(tp=tp, fp=fp, fn=fn, tn=tn, ap=ap)
 
 
@@ -107,7 +128,7 @@ def show_pair(ax_img, ax_ref, X, row, crop):
 
 def candidates(preds, X, crop, n=6, seed=0):
     rng = np.random.default_rng(seed)
-    fig, axes = plt.subplots(4, n, figsize=(2 * n, 8.6))
+    fig, axes = plt.subplots(4, n, figsize=(2.5 * n, 10.5))
     for r, (cat, name) in enumerate(CATS):
         pool = preds[preds.cat == cat]
         rows = pool.iloc[rng.choice(len(pool), min(n, len(pool)), replace=False)] if len(pool) else pool
@@ -120,13 +141,12 @@ def candidates(preds, X, crop, n=6, seed=0):
             img = crop_img(x[0], crop)
             ax.imshow(img.T, cmap="gray", origin="lower", vmin=0,
                       vmax=max(float(np.percentile(crop_img(x[1], crop), 99.5)), 1e-6))
-            ax.set_title(f"#{int(row.cache_idx)}  p={row.prob:.2f}", fontsize=8)
+            ax.set_title(f"#{int(row.cache_idx)}  p={row.prob:.2f}", fontsize=11)
             if c == 0:
-                ax.set_ylabel(name, fontsize=9)
-    fig.suptitle("Candidates for Figure 2b (image the model saw; pick one #id per row)", fontsize=10)
+                ax.set_ylabel(name, fontsize=12)
+    fig.suptitle("Candidates for Figure 2b (image the model saw; pick one #id per row)", fontsize=14)
     fig.tight_layout()
-    out = os.path.join(FIGS, "fig2b_candidates.png")
-    fig.savefig(out, dpi=150, bbox_inches="tight"); plt.close(fig)
+    out = export_figure(fig, "fig2b_candidates", dpi=200)
     return out
 
 
@@ -142,7 +162,7 @@ def auto_pick(preds):
 
 
 def fig_b(preds, X, crop, pick):
-    fig, axes = plt.subplots(2, 4, figsize=(10, 5.4))
+    fig, axes = plt.subplots(2, 4, figsize=(12.5, 6.8))
     by_idx = preds.set_index("cache_idx")
     for c, (cat, name) in enumerate(CATS):
         if cat not in pick:
@@ -151,13 +171,12 @@ def fig_b(preds, X, crop, pick):
         row = row.copy(); row["cache_idx"] = pick[cat]
         show_pair(axes[0, c], axes[1, c], X, row, crop)
         b = "b=0" if row.bval < 1 else f"b={row.bval:g}"
-        axes[0, c].set_title(f"{name}\nML p = {row.prob:.2f}  ({b})", fontsize=10)
-    axes[0, 0].set_ylabel("Image", fontsize=10)
-    axes[1, 0].set_ylabel("Reference\n(median of averages)", fontsize=10)
-    fig.suptitle("(b) Example decisions", x=0.01, ha="left", fontsize=11)
+        axes[0, c].set_title(f"{name}\nML p = {row.prob:.2f}  ({b})", fontsize=13)
+    axes[0, 0].set_ylabel("Image", fontsize=13)
+    axes[1, 0].set_ylabel("Reference\n(median of averages)", fontsize=13)
+    fig.suptitle("(b) Example decisions", x=0.01, ha="left", fontsize=16, fontweight="semibold")
     fig.tight_layout()
-    out = os.path.join(FIGS, "fig2b.png")
-    fig.savefig(out, dpi=300, bbox_inches="tight"); plt.close(fig)
+    out = export_figure(fig, "fig2b")
     return out
 
 
