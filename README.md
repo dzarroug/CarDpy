@@ -2,7 +2,20 @@
 
 A Python toolbox for processing cardiac diffusion tensor imaging (cDTI) data.
 
+## Pipeline overview
+
+https://github.com/user-attachments/assets/94ed65fc-ec80-4635-a24a-68b779b8f039
+
+Link to figure: [open Figure 1 (pipeline overview)](https://github.com/user-attachments/assets/94ed65fc-ec80-4635-a24a-68b779b8f039).
+
+## Command-line demo
+
+https://github.com/user-attachments/assets/d49ed1cd-8b80-441a-ae34-f27c8d6ec2c4
+
+Link to figure: [open Figure 2a (command-line demo)](https://github.com/user-attachments/assets/d49ed1cd-8b80-441a-ae34-f27c8d6ec2c4).
+
 For a complete guide, see **[HOW_TO_USE.md](https://github.com/dzarroug/CarDpy/blob/dev/HOW_TO_USE.md)**.
+
 
 # Getting Started
 
