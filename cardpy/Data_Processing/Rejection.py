@@ -248,7 +248,6 @@ def _shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thres
         if IntERACT_zoom == 'ON':
             [x_start, x_end, y_start, y_end] = INTERACT_GUI(original_matrix_stacked, organ, gui_version=gui_version)
             Slice_Crop_Coordinates = [x_start, x_end, y_start, y_end]
-            print('Slice Crop Coordinates: %s' % Slice_Crop_Coordinates)
         if IntERACT_zoom == 'OFF':
             print('Interact is off')
             x_start = []                                                                                                                   #
@@ -257,7 +256,6 @@ def _shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_thres
             y_end   = []                                                                                                                   #
             temporary_matrix_list = []                                                                                                     #
             for slc in range(slices):                                                                            # Iterate through slices
-                print(slc)
                 image               = np.max(original_matrix_stacked[:, :, slc, :], axis = 2)                                                  #
                 image_normalization = image / image.max()                                                                                      #
                 # Select ROI
