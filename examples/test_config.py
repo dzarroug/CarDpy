@@ -11,4 +11,4 @@ config["segmentation"]["mode"] = "auto"
 config["rejection"]["mode"] = "manual"
 # config["rejection"]["ml_model_path"] = None # should use the bundled model
 
-results = process("/Users/dahniazarroug/Desktop/Dahnia/V001", config)
+results = process("/path/to/your/study/folder", config)
