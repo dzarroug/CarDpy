@@ -7,7 +7,7 @@ import numpy                             as np
 from   matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from   screeninfo                        import get_monitors
 
-def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='legacy', initial_coordinates=None):
+def INTERACT_GUI(original_matrix, organ_of_intrest, gui_version='v2', initial_coordinates=None):
     if gui_version == 'v2':
         from cardpy.GUI_Tools.IntERACT_v2 import INTERACT_GUI as box_crop
         return box_crop(original_matrix, organ_of_intrest, initial_coordinates=initial_coordinates)

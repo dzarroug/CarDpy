@@ -52,7 +52,7 @@ def prepare_respiratory_crop(matrix, bvals, bvecs, directory, organ='Stomach',
 
 
 
-def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude', gui_version = 'legacy', crop_coordinates = None, return_order = False):
+def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 'ON', IntERACT_zoom = 'ON', organ = 'Liver', operation_type = 'Magnitude', gui_version = 'v2', crop_coordinates = None, return_order = False):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix         : Sorted diffusion data (5D - [rows, columns, slices, directions, averages]).

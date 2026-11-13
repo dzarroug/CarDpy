@@ -226,7 +226,7 @@ def process(study_root, config, save=True, *, input_data=None, stop_after_dti=Fa
         gui['reuse_existing_segmentation'] = segmentation_saved_mode != 'off'
         gui['segmentation_review'] = segmentation_saved_mode == 'review'
 
-    gui_version = gui.get("version", "legacy")
+    gui_version = gui.get("version", "v2")
     scan_name = gui.get("scan_name") or os.path.basename(os.path.normpath(out_path))
     if scan_name in ('', 'CarDpy_Output'):
         scan_name = os.path.basename(os.path.normpath(os.fspath(study_root)))

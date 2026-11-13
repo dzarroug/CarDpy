@@ -7,7 +7,7 @@ from cardpy.Colormaps import cDTI_Colormaps_Generator
 
 cDTI_cmaps = cDTI_Colormaps_Generator()
 
-def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='legacy', crop_bounds=None,
+def New_GUI(avg_diff_image, ADC_image, E1_image, gui_version='v2', crop_bounds=None,
             md_max=3.0, point_size=8.0, scan_name=None, initial_contours=None, return_crop=False):
     if gui_version == 'v2':
         from cardpy.GUI_Tools.IntERCOMS_Spline_v2 import New_GUI as responsive_gui

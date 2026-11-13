@@ -56,7 +56,7 @@ def _apply_sorted_keep(matrix, keep, bvals=None, bvecs=None):
     return accepted
 
 
-def _shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON',IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'legacy', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off", rejection_mode = 'algorithm', ml_model_path = None, ml_threshold = None, ml_input = None):
+def _shot_rejection(original_matrix, original_bvals, original_bvecs, NRMSE_threshold = 0.75, NSSIM_threshold = 0.75, zoom = 'ON',IntERACT_zoom = 'ON', organ = 'Heart', operation_type = 'Magnitude', diagnostics_path = None, gui_version = 'v2', save_diagnostics = True, manual_review = False, saved_configuration_mode = "off", rejection_mode = 'algorithm', ml_model_path = None, ml_threshold = None, ml_input = None):
     """
     ########## Definition Inputs ##################################################################################################################
     original_matrix       : Sorted diffusion data (5D).
