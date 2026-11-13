@@ -16,3 +16,7 @@ PURL_test_raw/
 ml_rejection/figures/
 rejection_comparison*/
 Manual_Shot_Rejection/
+*.zip
+ml_rejection/cache*/
+REVIEW_data/
+.vscode/
