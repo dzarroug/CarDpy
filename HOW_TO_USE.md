@@ -1,7 +1,7 @@
 # CarDpy — How to Use
 
-The full guide to CarDpy 2.0: installing it, pointing it at your data, every
-configuration option, the GUIs, outputs, and troubleshooting. For a short
+The full guide to CarDpy 2.0. Includes installation, pointing at your data,
+configuration options, navigating the GUIs, outputs, and troubleshooting. For a short
 overview, see the **[README](https://github.com/dzarroug/CarDpy/blob/dev/README.md)**.
 
 ---
