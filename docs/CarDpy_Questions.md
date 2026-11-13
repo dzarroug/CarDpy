@@ -1,3 +1,13 @@
+## Ongoing Tasks
+- windows testing
+
+## Proposed Merges with Tyler
+- New registration WIP
+- New Gibb's Ringing Correction 
+- New data loading algorithm
+
+
+
 # CarDpy — Questions
 
 - `registration_algorithm = 'Affine'`
