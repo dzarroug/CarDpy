@@ -40,9 +40,28 @@ Affine registration before respiratory sorting, standalone registration, and
 registration after averaging. Outputs retain the original file names, stage
 folder names and numbering, and go to the same output locations as before.
 
-Subject selections and patient/Even/Odd branching are retained. In particular,
-Blip Up's non-patient input remains under `01_Original_cDTI_Dicom`, while Blip
-Down's remains under `02_Anonymized_Data`, matching the original notebooks.
+Both blip notebooks currently select `Aortic Stenosis Patient 007` under
+`/Volumes/T7/Smart_Health_Reorganized/00_Original_Data` and save under
+`/Volumes/T7/Smart_Health_Reorganized/01_Processed_Data`. Edit the subject and
+root paths in the settings cell for other studies.
+
+`smart_health_inputs.resolve_blip_directory` selects Blip Up = FH/LR/AP and
+Blip Down = HF/RL/PA, following this workflow's naming convention. It searches `02_cDTI/SAX`
+series folders and supports legacy `02_cDTI/BlipUp`, `BlipDown`, and direct
+subject acquisition folders. It checks the first DICOM header per series
+without reading pixels, using `SeriesDescription` and `ProtocolName` tokens
+such as `F-H`, `H-F`, `L-R`, `R-L`, `A-P`, or `P-A` when folder names lack a
+direction. A header is checked even when the folder already has a direction.
+Conflicting labels
+or multiple matching series raise an error; choose `config['dicom_subpath']`
+explicitly in that case (including studies containing more than one direction
+pair). Even/Odd mode selects the named acquisition folder.
+This is a study convention, not a general inference of polarity from patient
+position or the DICOM ROW/COL phase-encoding axis.
+
+For Patient 007, Blip Up selects `02_cDTI/SAX/cDTI_b350_FH_Series0063`
+(DICOM description `cDTI_SF_b350_F-H`); Blip Down selects
+`02_cDTI/SAX/cDTI_b350_HF_Series0073` (`cDTI_SF_b350_H-F`).
 
 TOPUP reads the existing `*_TOPUP_Final_Data/TOPUP_Corrected` files and begins
 saving at `13_Registered`. It does not repeat Gibbs removal, rejection, or
@@ -60,7 +79,12 @@ original sequences (including parameters and save numbering), and imports and
 notebook syntax checked. Full imaging processing and interactive GUIs were not
 run.
 
-The notebooks use absolute data paths under `/Volumes/T7_old/Smart_Health` so moving this folder does not change input/output locations. Their first cell runs `pip install -e .` in the GitHub checkout using the active kernel Python.
+The notebooks use absolute data paths so moving this folder does not change
+input/output locations. TOPUP uses the same Patient 007 processed-data root under
+`/Volumes/T7/Smart_Health_Reorganized/01_Processed_Data`, reading corrected
+inputs from the subject's `TOPUP/*_TOPUP_Final_Data` folder and writing stages
+under that subject's `TOPUP` folder. Their first cell runs `pip install -e .` in the
+GitHub checkout using the active kernel Python.
 
 Rejection compatibility: the v2 UI and current automatic rejection decisions are
 used, but each rejected repetition is replaced by a random accepted repetition
