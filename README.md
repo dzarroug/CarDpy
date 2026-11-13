@@ -8,13 +8,9 @@ NIfTI input to diffusion tensor and cardiac metrics (MD, FA, helix angle, E2A).
 
 https://github.com/user-attachments/assets/94ed65fc-ec80-4635-a24a-68b779b8f039
 
-If the video doesn't play, [open Figure 1 (pipeline overview)](https://github.com/user-attachments/assets/94ed65fc-ec80-4635-a24a-68b779b8f039).
-
 ## Command-line demo
 
 https://github.com/user-attachments/assets/d49ed1cd-8b80-441a-ae34-f27c8d6ec2c4
-
-If the video doesn't play, [open Figure 2a (command-line demo)](https://github.com/user-attachments/assets/d49ed1cd-8b80-441a-ae34-f27c8d6ec2c4).
 
 ## Updates in CarDpy 2.0
 
