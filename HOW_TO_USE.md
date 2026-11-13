@@ -460,7 +460,7 @@ compact arrays.
 
 | Problem | Fix |
 |---|---|
-| `ModuleNotFoundError: torch` (or any package you installed) | You're in the wrong Python. Run `which python` and activate the `cardpy` environment. |
+| `ModuleNotFoundError: torch` (or any package you installed) | You may be in the wrong Python. Run `which python` and activate the `cardpy` environment. |
 | `ModuleNotFoundError: ultralytics` during automated segmentation | Install it in the environment actually running CarDpy: `pip install ultralytics`. |
 | Weights download fails | Request access at the Hugging Face repo, then run `hf auth login`. |
 | Segmentation fault on macOS | In scripts that open no windows, add `import matplotlib; matplotlib.use("Agg")` at the top. If you call torch yourself alongside CarDpy, add `torch.set_num_threads(1)`. |
