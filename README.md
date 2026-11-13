@@ -39,7 +39,7 @@ The PyPI name is `cardpy-cmr`; the import name is `cardpy`.
 - **nnUNet-Segment weights** (~4 GB) download on first use from the gated
   Hugging Face repo [`sash99666/cdti-lv-baseline`](https://huggingface.co/sash99666/cdti-lv-baseline).
   Request access on that page, then run `hf auth login` once. Manual
-  segmentation needs neither.
+  segmentation does need either of these steps.
 
 ## Quick start
 
