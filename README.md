@@ -1,8 +1,8 @@
 # CarDpy
 
-**Cardiac Diffusion in Python**: a toolbox that turns cardiac diffusion tensor
-imaging (cDTI) data into clinical maps (MD, FA, helix angle, E2A and more) with
-a single call.
+**Cardiac Diffusion in Python**: a Python toolbox for processing cardiac
+diffusion tensor imaging (cDTI) data. It runs the full pipeline, from DICOM or
+NIfTI input to diffusion tensor and cardiac metrics (MD, FA, helix angle, E2A).
 
 ## Pipeline overview
 
