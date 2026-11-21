@@ -166,6 +166,9 @@ def respiratory_sorting(original_matrix, original_bvals, original_bvecs, zoom = 
     for slc in range(slices):
         if x_end[slc] - x_start[slc] < 7 or y_end[slc] - y_start[slc] < 7:
             raise ValueError('Respiratory sorting requires a crop at least 7 x 7 pixels per slice.')
+    print('Respiratory sorting: temporary Local PCA denoising is used internally to score '
+          'images for sorting only. It does not change the output images and is '
+          'independent of the denoising stage setting.')
     if available.all():
         denoised_matrix, _, _ = denoise(temporary_matrix, original_bvals, original_bvecs,
                                         denoising_algorithm='LocalPCA')

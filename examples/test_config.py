@@ -6,9 +6,9 @@ config["data_type"]     = "DICOM"
 config["dicom_subpath"] = "02_cDTI/SAX/trap_2x2x8_b400_24_MR"
 config["slice_index"]   = [0]
 config["gui"]["version"] = "v2"
-config["segmentation"]["mode"] = "auto"
+config["segmentation"]["mode"] = "manual"
 # config["segmentation"]["review"] = True
-config["rejection"]["mode"] = "manual"
+config["rejection"]["mode"] = "algorithm"
 # config["rejection"]["ml_model_path"] = None # should use the bundled model
 
-results = process("/path/to/your/study/folder", config)
+results = process("/Users/dahniazarroug/Desktop/ISMRM abstract info/Dahnia/V001", config)

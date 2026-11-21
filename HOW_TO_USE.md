@@ -136,6 +136,9 @@ config["respiratory"]["zoom"]          = "ON"
 config["respiratory"]["interact_zoom"] = "ON"
 config["respiratory"]["organ"]         = "Stomach"   # label on the crop window only
 ```
+**Note:** Respiratory sorting always runs a temporary Local PCA denoising internally to score
+images, so you will see a denoising message even with `config["denoising"]["enabled"] = False`.
+It does not change the output images and is separate from the denoising stage.
 
 ### Registration
 ```python

@@ -40,6 +40,7 @@ class ContourWindow:
         self.current_crop = self.initial_crop.copy()
         self.points = {stage: [] for stage in self.stages}
         self.confirmed = {stage: False for stage in self.stages}
+        self.closed = {stage: False for stage in self.stages}
         self.contours = {}
         self.review_mode = initial_contours is not None
         if initial_contours is not None:
@@ -139,6 +140,7 @@ class ContourWindow:
                 raise ValueError(f'Invalid saved {stage} coordinates.')
             if stage in ('epi', 'endo'):
                 self.contours[stage] = points.copy()
+                self.closed[stage] = True
                 handles = points[:-1] if np.allclose(points[0], points[-1]) else points
                 if len(handles) < 4:
                     raise ValueError(f'Saved {stage} must contain four distinct contour points.')
@@ -250,9 +252,11 @@ class ContourWindow:
         self.remember()
         if self.stage in ('antRVIP', 'infRVIP'):
             self.points[self.stage] = [(x, y)]
-        else:
+        elif self.closed[self.stage]:
             index = insertion_index(self.points[self.stage], (x, y))
             self.points[self.stage].insert(index, (x, y))
+        else:
+            self.points[self.stage].append((x, y))
         self.draw_points()
         self.update_status()
 
@@ -310,6 +314,7 @@ class ContourWindow:
             self.update_status('Pick at least four distinct contour points, or one RV insertion point.')
             return
         self.confirmed[self.stage] = True
+        self.closed[self.stage] = True
         self.draw_points()
         self.update_status('Stage saved. Select any contour or insertion point to continue editing.')
 
